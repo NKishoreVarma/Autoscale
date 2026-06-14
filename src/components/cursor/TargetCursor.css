@@ -1,0 +1,6 @@
+/* TargetCursor.css */
+@media (min-width: 1024px) {
+  .cursor-target {
+    cursor: none !important;
+  }
+}
