@@ -1,47 +1,55 @@
 import React, { useState, useEffect } from 'react';
+import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
 
-const INDUSTRIES_DATA = [
+const DEFAULT_INDUSTRIES = [
   {
     title: "Healthcare",
     leak: "Over 60% of after-hours calls and patient inquiries are missed.",
     metricPrefix: "+",
     metricValue: 35,
-    metricSuffix: "% appointments booked"
+    metricSuffix: "% appointments booked",
+    order: 0
   },
   {
     title: "Real Estate",
     leak: "Agents spend 18+ hours/week calling unqualified buyer leads.",
     metricPrefix: "Lead response cut to ",
     metricValue: 90,
-    metricSuffix: "s"
+    metricSuffix: "s",
+    order: 1
   },
   {
     title: "Education",
     leak: "Admissions flooded by duplicate fee FAQs and incomplete application drop-offs.",
     metricPrefix: "",
     metricValue: 75,
-    metricSuffix: "% FAQs deflected"
+    metricSuffix: "% FAQs deflected",
+    order: 2
   },
   {
     title: "Ecommerce",
     leak: "Cart abandonment rate hovers at 70% with zero automated follow-up.",
     metricPrefix: "",
     metricValue: 18,
-    metricSuffix: "% cart revenue reclaimed"
+    metricSuffix: "% cart revenue reclaimed",
+    order: 3
   },
   {
     title: "Agencies",
     leak: "Founders spend 12+ hours/week compiling reports and syncing platforms manually.",
     metricPrefix: "Report times cut to ",
     metricValue: 30,
-    metricSuffix: "s"
+    metricSuffix: "s",
+    order: 4
   },
   {
     title: "Legal",
     leak: "Assistant intake forms ingestion delay causes prospective case drop-offs.",
     metricPrefix: "-",
     metricValue: 40,
-    metricSuffix: "% case onboarding time"
+    metricSuffix: "% case onboarding time",
+    order: 5
   }
 ];
 
@@ -85,13 +93,47 @@ function AnimatedMetric({ prefix, value, suffix, isHovered }) {
 }
 
 export default function IndustrySolutions() {
+  const [industries, setIndustries] = useState([]);
   const [hoveredIdx, setHoveredIdx] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, 'industries'), orderBy('order', 'asc'));
+    const unsubscribe = onSnapshot(q, async (snap) => {
+      if (snap.empty) {
+        console.log("[IndustrySolutions] No industries found. Seeding defaults...");
+        for (const ind of DEFAULT_INDUSTRIES) {
+          try {
+            await addDoc(collection(db, 'industries'), {
+              ...ind,
+              createdAt: serverTimestamp()
+            });
+          } catch (e) {
+            console.error("Error seeding industry:", e);
+          }
+        }
+      } else {
+        setIndustries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleOpenModal = () => {
     window.dispatchEvent(new CustomEvent('open-lead-modal', {
       detail: { service: 'Custom Systems', message: 'Inquiry from Industries Section' }
     }));
   };
+
+  if (loading) {
+    return (
+      <div className="py-20 flex justify-center items-center">
+        <div className="w-6 h-6 border-t border-r border-white rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <section id="industries" className="section-container relative w-full bg-transparent border-t border-white/10">
@@ -109,11 +151,11 @@ export default function IndustrySolutions() {
 
         {/* 6 Grid Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full mb-16">
-          {INDUSTRIES_DATA.map((ind, idx) => {
+          {industries.map((ind, idx) => {
             const isHovered = hoveredIdx === idx;
             return (
               <div
-                key={idx}
+                key={ind.id}
                 onMouseEnter={() => setHoveredIdx(idx)}
                 onMouseLeave={() => setHoveredIdx(null)}
                 className="cursor-target relative p-8 rounded-[24px] border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.05] hover:border-[#5E0ED7]/25 hover:-translate-y-1 hover:shadow-[0_10px_30px_rgba(94,14,215,0.06)] transition-all duration-300 flex flex-col justify-between h-[280px] group overflow-hidden"

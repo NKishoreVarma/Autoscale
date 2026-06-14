@@ -6,17 +6,22 @@ import NotificationCenter from './NotificationCenter';
 import {
   LayoutDashboard, Users, BarChart3, Settings, LogOut, Menu, X, Bell,
   Building2, FolderKanban, Package, Calendar, Inbox, UsersRound, Lock,
-  CheckSquare, FileText
+  CheckSquare, FileText, Cpu, Mail, Globe, GitBranch
 } from 'lucide-react';
 
 const navItems = [
   { name: 'Dashboard', path: '/admin/overview', icon: LayoutDashboard },
+  { name: 'Pipeline', path: '/admin/pipeline', icon: GitBranch },
   { name: 'Leads', path: '/admin/leads', icon: Users },
+  { name: 'AI Audits', path: '/admin/audit', icon: Cpu },
+  { name: 'Proposals', path: '/admin/proposals', icon: FileText },
   { name: 'Clients', path: '/admin/clients', icon: Building2 },
   { name: 'Projects', path: '/admin/projects', icon: FolderKanban },
   { name: 'Tasks', path: '/admin/tasks', icon: CheckSquare },
   { name: 'Team', path: '/admin/team', icon: UsersRound },
   { name: 'Invoices', path: '/admin/invoices', icon: FileText },
+  { name: 'Communications', path: '/admin/communication', icon: Mail },
+  { name: 'Website CMS', path: '/admin/cms', icon: Globe },
   { name: 'Services', path: '/admin/services', icon: Package },
   { name: 'Bookings', path: '/admin/bookings', icon: Calendar },
   { name: 'Contact Forms', path: '/admin/contact-forms', icon: Inbox },

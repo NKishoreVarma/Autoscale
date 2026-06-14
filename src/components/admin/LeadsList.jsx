@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { collection, doc, updateDoc, addDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, doc, updateDoc, addDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Search, Calendar, MessageSquare, X, Plus, Trash, Check, User, Building, Phone, Mail, FileText, Edit2, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { sanitizeInput } from '../../utils/sanitizer';
 
 const STATUSES = ['New', 'Qualified', 'Proposal Sent', 'Won', 'Lost', 'Pending', 'Scheduled', 'Completed', 'Cancelled'];
 const STATUS_COLORS = {
@@ -16,6 +17,39 @@ const STATUS_COLORS = {
   Scheduled: 'border-blue-500/20 text-blue-400 bg-blue-950/10',
   Completed: 'border-purple-500/20 text-purple-400 bg-purple-950/10',
   Cancelled: 'border-rose-500/20 text-rose-400 bg-rose-950/10'
+};
+
+export const calculateLeadScore = (lead) => {
+  const budget = Number(lead.contractValue || lead.budget || 0);
+  if (budget > 150000) return 'Hot';
+  if (budget >= 50000) return 'Warm';
+
+  const service = (lead.service || '').toLowerCase();
+  const desc = (lead.message || '').toLowerCase();
+  const industry = (lead.industry || '').toLowerCase();
+
+  if (
+    service.includes('ai') || 
+    service.includes('custom') || 
+    desc.includes('enterprise') || 
+    desc.includes('scale') ||
+    industry === 'healthcare' || 
+    industry === 'legal'
+  ) {
+    return 'Hot';
+  }
+  
+  if (service.includes('whatsapp') || service.includes('support') || lead.phone) {
+    return 'Warm';
+  }
+
+  return 'Cold';
+};
+
+const SCORE_COLORS = {
+  Cold: 'border-blue-500/20 text-blue-400 bg-blue-950/10',
+  Warm: 'border-amber-500/20 text-amber-400 bg-amber-950/10',
+  Hot: 'border-rose-500/20 text-rose-400 bg-rose-950/10 animate-pulse'
 };
 
 const EMPTY_LEAD_FORM = {
@@ -54,6 +88,15 @@ export default function LeadsList() {
   const [industryFilter, setIndustryFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [sortBy, setSortBy] = useState('newest');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  // Reset page on search or filter change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, serviceFilter, industryFilter, sourceFilter, sortBy]);
 
   // Detail panel states
   const [notes, setNotes] = useState([]);
@@ -146,7 +189,7 @@ export default function LeadsList() {
     };
 
     const unsubscribeContactForms = onSnapshot(
-      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc'), limit(200)),
       (snapshot) => {
         contactFormsSnap = snapshot;
         const list = [];
@@ -164,7 +207,7 @@ export default function LeadsList() {
     );
 
     const unsubscribeBookings = onSnapshot(
-      query(collection(db, 'bookings'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(200)),
       (snapshot) => {
         bookingsSnap = snapshot;
         const list = [];
@@ -479,7 +522,7 @@ export default function LeadsList() {
     try {
       await addDoc(collection(db, 'notes'), {
         leadId: selectedLead.id,
-        content: newNote.trim(),
+        content: sanitizeInput(newNote.trim()),
         createdAt: serverTimestamp(),
         authorName: authUser?.email || 'Admin'
       });
@@ -497,7 +540,7 @@ export default function LeadsList() {
     try {
       await addDoc(collection(db, 'meetings'), {
         leadId: selectedLead.id,
-        title: newMeeting.title.trim(),
+        title: sanitizeInput(newMeeting.title.trim()),
         date: newMeeting.date,
         time: newMeeting.time,
         createdAt: serverTimestamp()
@@ -509,36 +552,45 @@ export default function LeadsList() {
   };
 
   // Filter & Sort math
-  const filteredLeads = leads
-    .filter((lead) => {
-      const matchesSearch = 
-        lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.email?.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredLeads = useMemo(() => {
+    return leads
+      .filter((lead) => {
+        const matchesSearch = 
+          lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          lead.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          lead.email?.toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesStatus = statusFilter === '' || lead.status === statusFilter;
-      const matchesService = serviceFilter === '' || lead.service === serviceFilter;
-      const matchesIndustry = industryFilter === '' || lead.industry === industryFilter;
-      const matchesSource = sourceFilter === '' || (lead.leadSource || 'Contact Form') === sourceFilter;
+        const matchesStatus = statusFilter === '' || lead.status === statusFilter;
+        const matchesService = serviceFilter === '' || lead.service === serviceFilter;
+        const matchesIndustry = industryFilter === '' || lead.industry === industryFilter;
+        const matchesSource = sourceFilter === '' || (lead.leadSource || 'Contact Form') === sourceFilter;
 
-      return matchesSearch && matchesStatus && matchesService && matchesIndustry && matchesSource;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'newest') {
-        const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
-        const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
-        return bTime - aTime;
-      }
-      if (sortBy === 'oldest') {
-        const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
-        const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
-        return aTime - bTime;
-      }
-      if (sortBy === 'name') {
-        return a.name.localeCompare(b.name);
-      }
-      return 0;
-    });
+        return matchesSearch && matchesStatus && matchesService && matchesIndustry && matchesSource;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'newest') {
+          const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+          const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+          return bTime - aTime;
+        }
+        if (sortBy === 'oldest') {
+          const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+          const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+          return aTime - bTime;
+        }
+        if (sortBy === 'name') {
+          return a.name.localeCompare(b.name);
+        }
+        return 0;
+      });
+  }, [leads, searchTerm, statusFilter, serviceFilter, industryFilter, sourceFilter, sortBy]);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedLeads = useMemo(() => {
+    return filteredLeads.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredLeads, startIndex, itemsPerPage]);
+
+  const totalPages = Math.ceil(filteredLeads.length / itemsPerPage) || 1;
 
   return (
     <div className="flex-grow flex flex-col gap-8">
@@ -654,25 +706,29 @@ export default function LeadsList() {
                   <th className="px-6 py-4">Name</th>
                   <th className="px-6 py-4">Company</th>
                   <th className="px-6 py-4">Email</th>
-                  <th className="px-6 py-4">Phone</th>
+                  <th className="px-6 py-4">Score</th>
                   <th className="px-6 py-4">Lead Source</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Created Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-sm">
-                {filteredLeads.map((lead) => (
+                {paginatedLeads.map((lead) => (
                   <tr
                     key={lead.id}
                     onClick={() => setSelectedLead(lead)}
                     className="hover:bg-white/[0.02] cursor-pointer transition duration-150 group"
                   >
                     <td className="px-6 py-4 font-medium text-white group-hover:text-white transition duration-150">
-                      {lead.name}
+                       {lead.name}
                     </td>
                     <td className="px-6 py-4 text-gray-300 font-light">{lead.company || '—'}</td>
                     <td className="px-6 py-4 text-gray-300 font-mono text-xs">{lead.email}</td>
-                    <td className="px-6 py-4 text-gray-300 font-mono text-xs">{lead.phone || '—'}</td>
+                    <td className="px-6 py-4">
+                      <span className={`text-[9px] font-bold tracking-widest px-2.5 py-0.5 rounded border uppercase ${SCORE_COLORS[calculateLeadScore(lead)]}`}>
+                        {calculateLeadScore(lead)}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-gray-400 font-light text-xs">{lead.leadSource || 'Contact Form'}</td>
                     <td className="px-6 py-4">
                       <span className={`text-[9px] font-bold tracking-widest px-2.5 py-0.5 rounded border uppercase ${STATUS_COLORS[lead.status] || 'border-white/10 text-gray-300'}`}>
@@ -686,6 +742,34 @@ export default function LeadsList() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between text-xs text-gray-400 bg-white/[0.01]">
+                <div>
+                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredLeads.length)} of {filteredLeads.length} leads
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-1.5 font-mono">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -707,9 +791,12 @@ export default function LeadsList() {
                 <span className="text-[10px] font-bold tracking-widest text-gray-500 uppercase">
                   Lead Details
                 </span>
-                <h2 className="text-xl font-normal text-white uppercase mt-1">
-                  {selectedLead.name}
-                </h2>
+                <div className="flex items-center gap-3 mt-1">
+                  <h2 className="text-xl font-normal text-white uppercase">{selectedLead.name}</h2>
+                  <span className={`text-[9px] font-bold tracking-widest px-2 py-0.5 rounded border uppercase ${SCORE_COLORS[calculateLeadScore(selectedLead)]}`}>
+                    {calculateLeadScore(selectedLead)}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button

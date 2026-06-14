@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Check } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { sanitizeInput } from '../utils/sanitizer';
 
 export default function LeadFormModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -79,13 +80,18 @@ export default function LeadFormModal() {
     setError('');
 
     try {
+      const sanitizedName = sanitizeInput(form.name.trim());
+      const sanitizedEmail = sanitizeInput(form.email.trim());
+      const sanitizedPhone = sanitizeInput(form.phone.trim());
+      const sanitizedCompany = sanitizeInput(form.company.trim());
+
       if (activeTab === 'audit') {
         const bookingPayload = {
-          name: form.name.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          company: form.company.trim(),
-          requestedService: form.service,
+          name: sanitizedName,
+          email: sanitizedEmail,
+          phone: sanitizedPhone,
+          company: sanitizedCompany,
+          requestedService: sanitizeInput(form.service),
           preferredDate: 'TBD',
           status: 'Pending',
           createdAt: serverTimestamp()
@@ -102,7 +108,7 @@ export default function LeadFormModal() {
           await addDoc(collection(db, 'notifications'), {
             type: 'new_booking',
             title: 'New Booking Request',
-            message: `${form.name.trim()} from ${form.company.trim()} requested a Book Audit for ${form.service}.`,
+            message: `${sanitizedName} from ${sanitizedCompany} requested a Book Audit for ${form.service}.`,
             read: false,
             createdAt: serverTimestamp()
           });
@@ -117,7 +123,7 @@ export default function LeadFormModal() {
             entity: 'booking',
             entityId: docRef.id,
             performedBy: 'website',
-            details: `New audit booking request from ${form.name.trim()} (${form.company.trim()}) for ${form.service}`,
+            details: `New audit booking request from ${sanitizedName} (${sanitizedCompany}) for ${form.service}`,
             createdAt: serverTimestamp()
           });
         } catch (aErr) {
@@ -126,11 +132,11 @@ export default function LeadFormModal() {
 
       } else {
         const contactPayload = {
-          name: form.name.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          company: form.company.trim(),
-          message: form.message.trim(),
+          name: sanitizedName,
+          email: sanitizedEmail,
+          phone: sanitizedPhone,
+          company: sanitizedCompany,
+          message: sanitizeInput(form.message.trim()),
           source: 'Contact Form',
           status: 'New',
           createdAt: serverTimestamp()
@@ -147,7 +153,7 @@ export default function LeadFormModal() {
           await addDoc(collection(db, 'notifications'), {
             type: 'new_lead',
             title: 'New Contact Submission',
-            message: `${form.name.trim()} from ${form.company.trim()} submitted the contact form.`,
+            message: `${sanitizedName} from ${sanitizedCompany} submitted the contact form.`,
             read: false,
             createdAt: serverTimestamp()
           });
