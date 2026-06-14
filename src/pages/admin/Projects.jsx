@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db, storage } from '../../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../../context/AuthContext';
@@ -68,6 +68,15 @@ export default function Projects() {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(15);
+
+  // Reset page index on filter change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, priorityFilter]);
+
   // Selected workspace elements
   const [workspaceTab, setWorkspaceTab] = useState('overview'); // overview, tasks, files, invoices, notes
   const [tasks, setTasks] = useState([]);
@@ -87,7 +96,7 @@ export default function Projects() {
   // Sync projects, clients, and team members
   useEffect(() => {
     const unsubProjects = onSnapshot(
-      query(collection(db, 'projects'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'projects'), orderBy('createdAt', 'desc'), limit(200)),
       (snapshot) => {
         setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         setLoading(false);
@@ -452,14 +461,23 @@ export default function Projects() {
     }
   };
 
-  const filteredProjects = projects.filter(project => {
-    const matchesSearch =
-      project.projectName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      project.clientName?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === '' || project.status === statusFilter;
-    const matchesPriority = priorityFilter === '' || project.priority === priorityFilter;
-    return matchesSearch && matchesStatus && matchesPriority;
-  });
+  const filteredProjects = useMemo(() => {
+    return projects.filter(project => {
+      const matchesSearch =
+        project.projectName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        project.clientName?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === '' || project.status === statusFilter;
+      const matchesPriority = priorityFilter === '' || project.priority === priorityFilter;
+      return matchesSearch && matchesStatus && matchesPriority;
+    });
+  }, [projects, searchTerm, statusFilter, priorityFilter]);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedProjects = useMemo(() => {
+    return filteredProjects.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProjects, startIndex, itemsPerPage]);
+
+  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage) || 1;
 
   return (
     <div className="flex-grow flex flex-col gap-8">
@@ -543,7 +561,7 @@ export default function Projects() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-sm">
-                {filteredProjects.map(project => (
+                {paginatedProjects.map(project => (
                   <tr
                     key={project.id}
                     onClick={() => {
@@ -585,6 +603,34 @@ export default function Projects() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between text-xs text-gray-400 bg-white/[0.01]">
+                <div>
+                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredProjects.length)} of {filteredProjects.length} projects
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-1.5 font-mono">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
