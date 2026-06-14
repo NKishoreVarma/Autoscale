@@ -1,0 +1,214 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // ROLE-BASED ACCESS CONTROL HELPERS
+    // ==========================================
+
+    // Helper to check if a user document exists and get its data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Super Admin: Kishore and Varma emails OR role 'super_admin' in users collection
+    function isSuperAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'kishorevarma2205@gmail.com' ||
+        request.auth.token.email == 'nkishore.varma.s81@kalvium.community' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'super_admin')
+      );
+    }
+
+    // Admin: is Super Admin OR has role 'admin'
+    function isAdmin() {
+      return request.auth != null && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'admin')
+      );
+    }
+
+    // Manager: is Admin/Super Admin OR has role 'manager'
+    function isManager() {
+      return request.auth != null && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'manager')
+      );
+    }
+
+    // Viewer: is Manager/Admin/Super Admin OR has role 'viewer'
+    function isViewer() {
+      return request.auth != null && (
+        isManager() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'viewer')
+      );
+    }
+
+    // Client helper functions
+    function isClient() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().role == 'client';
+    }
+
+    function getClientDocId() {
+      return getUserData().clientId;
+    }
+
+    function clientOwnsProject(projId) {
+      return isClient() && 
+             exists(/databases/$(database)/documents/projects/$(projId)) && 
+             get(/databases/$(database)/documents/projects/$(projId)).data.clientId == getClientDocId();
+    }
+
+    // ==========================================
+    // RULES BY COLLECTION
+    // ==========================================
+
+    // Users & Admins (Revocation & Invitations): Super Admin only
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin();
+    }
+
+    // Settings Collection: Super Admin only
+    match /settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if isSuperAdmin();
+    }
+
+    // Leads Collection: Public create, Viewers read, Managers update, Super Admin delete
+    match /leads/{leadId} {
+      allow create: if true; // Public submission from website LeadFormModal
+      allow read: if isViewer();
+      allow update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Contact Forms Collection: Public create, Viewers read, Managers update, Super Admin delete
+    match /contactForms/{formId} {
+      allow create: if true; // Public contact submission
+      allow read: if isViewer();
+      allow update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Bookings Collection: Public create, Viewers read, Managers update, Super Admin delete
+    match /bookings/{bookingId} {
+      allow create: if true; // Public audit booking
+      allow read: if isViewer();
+      allow update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Clients Collection: Viewers read, Managers create/update, Super Admin delete. Clients read their own profile.
+    match /clients/{clientId} {
+      allow read: if isViewer() || (isClient() && clientId == getClientDocId());
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Projects Collection: Viewers read, Managers create/update, Super Admin delete. Clients read their own projects.
+    match /projects/{projectId} {
+      allow read: if isViewer() || (isClient() && resource.data.clientId == getClientDocId());
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Payments Collection: Viewers read, Admins create/update, Super Admin delete
+    match /payments/{paymentId} {
+      allow read: if isViewer();
+      allow create, update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Services Collection: Public read, Admins manage, Super Admin delete
+    match /services/{serviceId} {
+      allow read: if true; // Public visibility on website
+      allow create, update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Notifications Collection: Public/Admin create, Viewers read/update, Super Admin delete
+    match /notifications/{notifId} {
+      allow create: if true; // Public submission notifications
+      allow read, update: if isViewer();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Analytics: Viewers read, Viewers update (for dashboard sync logic)
+    match /analytics/{docId} {
+      allow read: if isViewer();
+      allow write: if isViewer();
+    }
+
+    // Audit Logs: Immutable log records. Admins write logs, Super Admin reads, no deletions
+    match /auditLogs/{logId} {
+      allow create: if request.auth != null;
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    // Activity Logs: Public or Admins create, Viewers read, Super Admin delete
+    match /activity_logs/{logId} {
+      allow create: if true; // Website can write activity logs
+      allow read: if isViewer();
+      allow update: if isViewer();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Notes: Viewers read, Managers write/update, Super Admin delete. Clients read/create visible feedback.
+    match /notes/{noteId} {
+      allow read: if isViewer() || (isClient() && resource.data.leadId != null && clientOwnsProject(resource.data.leadId) && resource.data.clientVisible == true);
+      allow create: if isManager() || (isClient() && request.resource.data.leadId != null && clientOwnsProject(request.resource.data.leadId) && request.resource.data.clientVisible == true);
+      allow update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /meetings/{meetingId} {
+      allow read: if isViewer();
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // System Status
+    match /systemStatus/{statusId} {
+      allow read: if isViewer();
+      allow write: if isSuperAdmin();
+    }
+
+    // Team Members Collection: Viewers read, Super Admin manage
+    match /teamMembers/{memberId} {
+      allow read: if isViewer();
+      allow write: if isSuperAdmin();
+    }
+
+    // Invoices Collection: Viewers read, Admins write, Super Admin delete. Clients read their own.
+    match /invoices/{invoiceId} {
+      allow read: if isViewer() || (isClient() && resource.data.clientId == getClientDocId());
+      allow create, update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Project Files Collection: Viewers read, Admins/Managers write. Clients read/upload their own.
+    match /projectFiles/{fileId} {
+      allow read: if isViewer() || (isClient() && resource.data.projectId != null && clientOwnsProject(resource.data.projectId));
+      allow create: if isManager() || (isClient() && request.resource.data.projectId != null && clientOwnsProject(request.resource.data.projectId));
+      allow update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Project Timelines Collection: Viewers read, Admins/Managers write. Clients read/write events.
+    match /projectTimelines/{timelineId} {
+      allow read: if isViewer() || (isClient() && resource.data.projectId != null && clientOwnsProject(resource.data.projectId));
+      allow create: if isManager() || (isClient() && request.resource.data.projectId != null && clientOwnsProject(request.resource.data.projectId));
+      allow update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+  }
+}
