@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, addDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
@@ -23,11 +23,20 @@ export default function ContactForms() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(25);
+
+  // Reset page index on filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
   const isSuperAdmin = userRole === 'super_admin';
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc'), limit(200)),
       (snapshot) => {
         setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         setLoading(false);
@@ -124,14 +133,23 @@ export default function ContactForms() {
     }
   };
 
-  const filteredSubmissions = submissions.filter(sub => {
-    const matchesSearch =
-      sub.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.email?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === '' || sub.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredSubmissions = useMemo(() => {
+    return submissions.filter(sub => {
+      const matchesSearch =
+        sub.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        sub.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        sub.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === '' || sub.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [submissions, searchTerm, statusFilter]);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedSubmissions = useMemo(() => {
+    return filteredSubmissions.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredSubmissions, startIndex, itemsPerPage]);
+
+  const totalPages = Math.ceil(filteredSubmissions.length / itemsPerPage) || 1;
 
   return (
     <div className="flex-grow flex flex-col gap-8">
@@ -197,7 +215,7 @@ export default function ContactForms() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-sm">
-                {filteredSubmissions.map(sub => (
+                {paginatedSubmissions.map(sub => (
                   <tr
                     key={sub.id}
                     onClick={() => setSelectedSub(sub)}
@@ -223,6 +241,34 @@ export default function ContactForms() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between text-xs text-gray-400 bg-white/[0.01]">
+                <div>
+                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredSubmissions.length)} of {filteredSubmissions.length} submissions
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-1.5 font-mono">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

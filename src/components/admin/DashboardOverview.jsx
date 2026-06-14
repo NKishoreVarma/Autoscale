@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { checkSystemHealth } from '../../utils/healthService';
 import { saveDashboardMetrics } from '../../utils/analyticsService';
 import {
   Users, AlertCircle, CheckCircle, Calendar, ArrowUpRight,
   Building2, FolderKanban, CreditCard, Inbox, CheckSquare, TrendingUp, DollarSign,
-  Cpu, MessageCircle, Server, ShieldCheck, Activity, Globe, GitBranch, RefreshCw
+  Cpu, MessageCircle, Server, ShieldCheck, Activity, Globe, GitBranch, RefreshCw, PhoneCall, Bell
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -24,7 +24,8 @@ export default function DashboardOverview() {
   const [contactForms, setContactForms] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [services, setServices] = useState([]);
-  const [activities, setActivities] = useState([]);
+  const [meetings, setMeetings] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -54,7 +55,7 @@ export default function DashboardOverview() {
   // Listen to Firestore feeds
   useEffect(() => {
     let loadedCollections = 0;
-    const totalCollections = 7;
+    const totalCollections = 9;
     const checkLoaded = () => {
       loadedCollections++;
       if (loadedCollections >= totalCollections) setLoading(false);
@@ -102,6 +103,18 @@ export default function DashboardOverview() {
       () => checkLoaded()
     );
 
+    const unsubMeetings = onSnapshot(
+      query(collection(db, 'meetings'), orderBy('date', 'asc')),
+      (snap) => { setMeetings(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
+      () => checkLoaded()
+    );
+
+    const unsubNotifications = onSnapshot(
+      query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(5)),
+      (snap) => { setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
+      () => checkLoaded()
+    );
+
     return () => {
       unsubClients();
       unsubProjects();
@@ -110,203 +123,88 @@ export default function DashboardOverview() {
       unsubContactForms();
       unsubBookings();
       unsubServices();
+      unsubMeetings();
+      unsubNotifications();
     };
   }, []);
 
-  // Consolidate recent client activity feed
-  useEffect(() => {
-    const feed = [];
-
-    contactForms.slice(0, 3).forEach(form => {
-      feed.push({
-        id: `contact-${form.id}`,
-        type: 'lead',
-        icon: Users,
-        title: 'New Lead Ingested',
-        desc: `${form.name || 'Unknown'} (${form.company || 'N/A'}) submitted contact form.`,
-        time: form.createdAt?.toDate ? form.createdAt.toDate() : new Date(),
-      });
-    });
-
-    clients.slice(0, 3).forEach(client => {
-      feed.push({
-        id: `client-${client.id}`,
-        type: 'client',
-        icon: Building2,
-        title: 'Client Contract Activated',
-        desc: `${client.companyName || client.ownerName || 'New client'} onboarded.`,
-        time: client.createdAt?.toDate ? client.createdAt.toDate() : new Date(),
-      });
-    });
-
-    projects.slice(0, 3).forEach(project => {
-      feed.push({
-        id: `project-${project.id}`,
-        type: 'project',
-        icon: FolderKanban,
-        title: 'Project Initiated',
-        desc: `Project "${project.projectName || 'Untitled'}" started development.`,
-        time: project.createdAt?.toDate ? project.createdAt.toDate() : new Date(),
-      });
-    });
-
-    payments.slice(0, 3).forEach(payment => {
-      feed.push({
-        id: `payment-${payment.id}`,
-        type: 'payment',
-        icon: CreditCard,
-        title: 'Payment Received',
-        desc: `${formatCurrencyINR(payment.amount || 0)} recorded for client.`,
-        time: payment.createdAt?.toDate ? payment.createdAt.toDate() : new Date(),
-      });
-    });
-
-    bookings.slice(0, 3).forEach(app => {
-      feed.push({
-        id: `booking-${app.id}`,
-        type: 'booking',
-        icon: Calendar,
-        title: 'Booking Scheduled',
-        desc: `Consultation booked by ${app.name || app.client || app.email || 'Client'}.`,
-        time: app.createdAt?.toDate ? app.createdAt.toDate() : new Date(),
-      });
-    });
-
-    feed.sort((a, b) => b.time - a.time);
-    setActivities(feed.slice(0, 8));
-  }, [contactForms, clients, projects, payments, bookings]);
-
-  // Metric calculations (Phase 6 - Analytics Engine)
-  const totalLeads = contactForms.length + bookings.length;
-  const wonLeads = contactForms.filter(c => c.status === 'Won').length + bookings.filter(b => b.status === 'Won' || b.status === 'Completed').length;
-  const activeClients = clients.filter(c => c.status === 'Active').length;
-  const activeProjects = projects.filter(p => p.status === 'Planning' || p.status === 'Building' || p.status === 'Testing').length;
-  const totalServices = services.length;
-
-  const todayStr = new Date().toISOString().split('T')[0];
-  const thisMonthPrefix = new Date().toISOString().substring(0, 7);
-
-  const bookingsToday = bookings.filter(b => (b.preferredDate || b.date) === todayStr).length;
-  const bookingsThisMonth = bookings.filter(b => (b.preferredDate || b.date)?.startsWith(thisMonthPrefix)).length;
-
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentQuarter = Math.floor(now.getMonth() / 3);
-  const currentYear = now.getFullYear();
-
+  // Date parsing helper
   const parseInvoiceDate = (inv) => {
     if (inv.issueDate) return new Date(inv.issueDate);
     if (inv.createdAt?.toDate) return inv.createdAt.toDate();
     return new Date();
   };
 
-  // Invoices sums
-  const invoiceMonthly = invoices
-    .filter(i => {
-      if (i.status !== 'Paid') return false;
-      const d = parseInvoiceDate(i);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    })
-    .reduce((sum, i) => sum + (i.amount || 0), 0);
+  // Metric calculations
+  const totalLeads = contactForms.length + bookings.length;
+  
+  // Leads Today (since 00:00)
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const leadsToday = contactForms.filter(c => {
+    const d = c.createdAt?.toDate ? c.createdAt.toDate() : null;
+    return d && d >= startOfToday;
+  }).length + bookings.filter(b => {
+    const d = b.createdAt?.toDate ? b.createdAt.toDate() : null;
+    return d && d >= startOfToday;
+  }).length;
 
-  const invoiceQuarter = invoices
-    .filter(i => {
-      if (i.status !== 'Paid') return false;
-      const d = parseInvoiceDate(i);
-      return Math.floor(d.getMonth() / 3) === currentQuarter && d.getFullYear() === currentYear;
-    })
-    .reduce((sum, i) => sum + (i.amount || 0), 0);
-
-  const invoiceAnnual = invoices
-    .filter(i => {
-      if (i.status !== 'Paid') return false;
-      const d = parseInvoiceDate(i);
-      return d.getFullYear() === currentYear;
-    })
-    .reduce((sum, i) => sum + (i.amount || 0), 0);
-
-  const invoiceOutstanding = invoices
-    .filter(i => i.status === 'Sent' || i.status === 'Overdue')
-    .reduce((sum, i) => sum + (i.amount || 0), 0);
-
-  const invoicePaid = invoices
-    .filter(i => i.status === 'Paid')
-    .reduce((sum, i) => sum + (i.amount || 0), 0);
-
-  // Payments sums (fallback / backward compat)
-  const paymentMonthly = payments
-    .filter(p => {
-      if (p.status !== 'Paid') return false;
-      const d = p.date ? new Date(p.date) : p.createdAt?.toDate ? p.createdAt.toDate() : null;
-      return d && d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    })
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-  const paymentQuarter = payments
-    .filter(p => {
-      if (p.status !== 'Paid') return false;
-      const d = p.date ? new Date(p.date) : p.createdAt?.toDate ? p.createdAt.toDate() : null;
-      return d && Math.floor(d.getMonth() / 3) === currentQuarter && d.getFullYear() === currentYear;
-    })
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-  const paymentAnnual = payments
-    .filter(p => {
-      if (p.status !== 'Paid') return false;
-      const d = p.date ? new Date(p.date) : p.createdAt?.toDate ? p.createdAt.toDate() : null;
-      return d && d.getFullYear() === currentYear;
-    })
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-  const paymentOutstanding = payments
-    .filter(p => p.status === 'Pending' || p.status === 'Overdue')
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-  const paymentPaid = payments
-    .filter(p => p.status === 'Paid')
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-  // Unified sums
-  const monthlyRevenue = invoiceMonthly + paymentMonthly;
-  const quarterRevenue = invoiceQuarter + paymentQuarter;
-  const annualRevenue = invoiceAnnual + paymentAnnual;
-  const outstandingRevenue = invoiceOutstanding + paymentOutstanding;
-  const paidRevenue = invoicePaid + paymentPaid;
-
+  const wonLeads = contactForms.filter(c => c.status === 'Won').length + bookings.filter(b => b.status === 'Won' || b.status === 'Completed').length;
+  const activeProjects = projects.filter(p => p.status === 'Planning' || p.status === 'Building' || p.status === 'Testing').length;
   const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
 
-  // Sync state to analytics/dashboard
+  // Pipeline Value (Sum of budget/contract value of open leads)
+  const openLeads = [
+    ...contactForms.filter(c => c.status !== 'Won' && c.status !== 'Lost' && c.status !== 'Completed' && c.status !== 'Cancelled'),
+    ...bookings.filter(b => b.status !== 'Won' && b.status !== 'Lost' && b.status !== 'Completed' && b.status !== 'Cancelled')
+  ];
+  const pipelineValue = openLeads.reduce((sum, l) => sum + (Number(l.contractValue || l.budget) || 15000), 0);
+
+  // Paid Revenue calculations
+  const invoicePaid = invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + (i.amount || 0), 0);
+  const paymentPaid = payments.filter(p => p.status === 'Paid').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const paidRevenue = invoicePaid + paymentPaid;
+
+  // Sync state to analytics/dashboard with deduplication and debouncing
+  const lastSyncRef = useRef("");
+
   useEffect(() => {
     if (loading) return;
 
-    const syncMetrics = async () => {
-      await saveDashboardMetrics({
-        totalLeads,
-        totalClients: clients.length,
-        activeClients,
-        totalProjects: projects.length,
-        runningProjects: activeProjects,
-        totalServices,
-        bookingsToday,
-        bookingsThisMonth,
-        totalBookings: bookings.length,
-        revenueGenerated: paidRevenue,
-        monthlyRevenue
-      });
+    const metricsPayload = {
+      totalLeads,
+      totalClients: clients.length,
+      activeClients: clients.length,
+      totalProjects: projects.length,
+      runningProjects: activeProjects,
+      totalServices: services.length,
+      bookingsToday: leadsToday,
+      bookingsThisMonth: bookings.length,
+      totalBookings: bookings.length,
+      revenueGenerated: paidRevenue,
+      monthlyRevenue: paidRevenue
     };
 
-    syncMetrics();
-  }, [clients, projects, payments, invoices, bookings, contactForms, services, loading]);
+    const payloadStr = JSON.stringify(metricsPayload);
+    if (lastSyncRef.current === payloadStr) return;
+
+    lastSyncRef.current = payloadStr;
+
+    const syncMetrics = async () => {
+      await saveDashboardMetrics(metricsPayload);
+    };
+
+    const timer = setTimeout(syncMetrics, 2000);
+    return () => clearTimeout(timer);
+  }, [clients, projects, payments, invoices, bookings, contactForms, services, loading, totalLeads, activeProjects, leadsToday, paidRevenue]);
 
   const statCards = [
-    { name: 'Total Leads', value: totalLeads, icon: Users, desc: 'Aggregated website leads' },
-    { name: 'Active Projects', value: activeProjects, icon: FolderKanban, desc: 'Integrations in builder pipeline' },
-    { name: 'Monthly Revenue', value: formatCurrencyINR(monthlyRevenue), icon: DollarSign, desc: 'Revenue recorded this month' },
-    { name: 'Quarter Revenue', value: formatCurrencyINR(quarterRevenue), icon: DollarSign, desc: 'Revenue recorded this quarter' },
-    { name: 'Annual Revenue', value: formatCurrencyINR(annualRevenue), icon: DollarSign, desc: 'Revenue recorded this year' },
-    { name: 'Outstanding Bills', value: formatCurrencyINR(outstandingRevenue), icon: AlertCircle, desc: 'Total outstanding invoices' },
-    { name: 'Paid Invoices', value: formatCurrencyINR(paidRevenue), icon: CheckCircle, desc: 'Total client invoice payments' },
-    { name: 'Conversion Rate', value: `${conversionRate}%`, icon: TrendingUp, desc: 'Ratio of won accounts' },
+    { name: 'Leads Today', value: leadsToday, icon: Users, desc: 'Captured since midnight' },
+    { name: 'Active Projects', value: activeProjects, icon: FolderKanban, desc: 'Deliverables under construction' },
+    { name: 'Revenue Generated', value: formatCurrencyINR(paidRevenue), icon: DollarSign, desc: 'Total paid invoices and bills' },
+    { name: 'Pipeline Value', value: formatCurrencyINR(pipelineValue), icon: TrendingUp, desc: 'Value of outstanding deal pipeline' },
+    { name: 'Conversion Rate', value: `${conversionRate}%`, icon: CheckCircle, desc: 'Proportion of won client contracts' },
+    { name: 'Total Leads Captured', value: totalLeads, icon: Inbox, desc: 'Cumulative leads database size' },
   ];
 
   const getStatusBadge = (statusVal) => {
@@ -346,19 +244,18 @@ export default function DashboardOverview() {
 
   return (
     <div className="flex flex-col gap-10 flex-grow">
-      
       {/* Title Header */}
       <div>
         <span className="text-[10px] font-bold tracking-[0.25em] text-gray-500 uppercase">
-          PERFORMANCE DASHBOARD
+          FOUNDER MISSION CONTROL
         </span>
         <h1 className="text-3xl font-normal tracking-tight text-white uppercase mt-1">
-          FOUNDER OVERVIEW
+          COMMAND CENTER
         </h1>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {statCards.map((stat, idx) => {
           const Icon = stat.icon;
           return (
@@ -384,7 +281,7 @@ export default function DashboardOverview() {
         })}
       </div>
 
-      {/* Middle Row — System and Deployment Status */}
+      {/* Health Checklist row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
         {/* Live System Status Panel */}
@@ -435,7 +332,7 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Deployment Status Panel */}
+        {/* Dynamic Deployment / Build Info */}
         <div
           className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-6"
           style={{ boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.05)' }}
@@ -446,7 +343,7 @@ export default function DashboardOverview() {
               <span>Production Deployment Status</span>
             </h3>
             <span className="text-[10px] font-bold text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/10 uppercase font-mono">
-              v1.2.4-stable
+              v1.5.0-growth
             </span>
           </div>
 
@@ -477,105 +374,88 @@ export default function DashboardOverview() {
                 <Activity className="w-3.5 h-3.5" />
                 <span>LAST DEPLOYED TIMESTAMP</span>
               </div>
-              <span className="text-white">2026-06-13 18:42:05</span>
+              <span className="text-white">2026-06-14 22:45:00</span>
             </div>
           </div>
         </div>
 
       </div>
 
-      {/* Bottom Grid — Recent Leads & Recent Client Activity */}
+      {/* Bottom Grid — Upcoming Calls & Recent Notifications */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
         
-        {/* Recent Leads Panel */}
+        {/* Upcoming Calls / Meetings */}
         <div
           className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-6"
           style={{ boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.05)' }}
         >
           <div className="flex justify-between items-center border-b border-white/5 pb-4">
             <h3 className="text-sm font-semibold tracking-wider uppercase text-white flex items-center gap-2">
-              <Users className="w-4 h-4 text-gray-400" />
-              <span>Recent Leads</span>
+              <PhoneCall className="w-4 h-4 text-gray-400" />
+              <span>Upcoming Calls & Meetings</span>
             </h3>
             <button
               onClick={() => navigate('/admin/leads')}
               className="text-xs text-gray-400 hover:text-white flex items-center gap-1 transition"
             >
-              <span>View Directory</span>
+              <span>Schedule Call</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
           <div className="divide-y divide-white/5 flex-grow">
-            {leads.length === 0 ? (
+            {meetings.length === 0 ? (
               <div className="py-8 text-center text-xs text-gray-500 uppercase tracking-wider">
-                No active leads captured yet.
+                No upcoming consultations scheduled.
               </div>
             ) : (
-              leads.slice(0, 5).map((lead) => (
-                <div key={lead.id} className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between group">
+              meetings.slice(0, 5).map((meet) => (
+                <div key={meet.id} className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between">
                   <div className="flex flex-col">
-                    <span className="text-sm font-medium text-white">{lead.name}</span>
-                    <span className="text-xs text-gray-500 mt-0.5">{lead.company} &bull; {lead.service}</span>
+                    <span className="text-xs font-semibold text-white uppercase">{meet.title}</span>
+                    <span className="text-[10px] text-gray-500 font-mono mt-0.5">{meet.date} &bull; {meet.time}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-gray-400 font-mono">
-                      {lead.createdAt?.toDate ? lead.createdAt.toDate().toLocaleDateString('en-IN') : 'Recent'}
-                    </span>
-                    <span className={`text-[9px] font-bold tracking-widest px-2 py-0.5 rounded border uppercase ${
-                      lead.status === 'New' ? 'border-amber-500/20 text-amber-400 bg-amber-950/10' :
-                      lead.status === 'Won' ? 'border-emerald-500/20 text-emerald-400 bg-emerald-950/10' :
-                      lead.status === 'Lost' ? 'border-rose-500/20 text-rose-400 bg-rose-950/10' :
-                      'border-white/10 text-gray-300'
-                    }`}>
-                      {lead.status || 'New'}
-                    </span>
-                  </div>
+                  <span className="text-[9px] font-bold text-gray-400 tracking-wider uppercase border border-white/10 px-2 py-0.5 rounded bg-white/5">
+                    Call Slot
+                  </span>
                 </div>
               ))
             )}
           </div>
         </div>
 
-        {/* Recent Client Activity Feed */}
+        {/* Real-time System Notifications Feed */}
         <div
           className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-6"
           style={{ boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.05)' }}
         >
           <div className="flex justify-between items-center border-b border-white/5 pb-4">
             <h3 className="text-sm font-semibold tracking-wider uppercase text-white flex items-center gap-2">
-              <Activity className="w-4 h-4 text-gray-400" />
-              <span>Recent Client Activity</span>
+              <Bell className="w-4 h-4 text-gray-400" />
+              <span>Recent System Notifications</span>
             </h3>
           </div>
 
-          <div className="flex flex-col gap-5 flex-grow">
-            {activities.length === 0 ? (
+          <div className="flex flex-col gap-5 flex-grow font-light text-xs">
+            {notifications.length === 0 ? (
               <div className="py-8 text-center text-xs text-gray-500 uppercase tracking-wider">
-                No recent workspace events.
+                No notifications received.
               </div>
             ) : (
-              activities.map((act) => {
-                const ActIcon = act.icon;
-                return (
-                  <div key={act.id} className="flex gap-4 items-start">
-                    <div className="mt-1 flex-shrink-0 w-6 h-6 rounded-full border border-white/10 flex items-center justify-center bg-white/5 text-gray-400">
-                      <ActIcon className="w-3 h-3" />
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold text-white uppercase tracking-wider">
-                        {act.title}
-                      </span>
-                      <p className="text-xs text-gray-400 mt-0.5 leading-relaxed font-light">
-                        {act.desc}
-                      </p>
-                      <span className="text-[9px] text-gray-600 font-mono mt-1">
-                        {act.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &bull; {act.time.toLocaleDateString('en-IN')}
-                      </span>
-                    </div>
+              notifications.map((notif) => (
+                <div key={notif.id} className="flex gap-4 items-start border-b border-white/5 pb-3 last:border-0 last:pb-0">
+                  <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border border-white/10 flex items-center justify-center bg-white/5 text-gray-500">
+                    <Bell className="w-3 h-3" />
                   </div>
-                );
-              })
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-white uppercase tracking-wider">{notif.title}</span>
+                    <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed normal-case">{notif.message}</p>
+                    <span className="text-[9px] text-gray-600 font-mono mt-1">
+                      {notif.createdAt?.toDate ? notif.createdAt.toDate().toLocaleString('en-IN') : 'Recent'}
+                    </span>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>

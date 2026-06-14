@@ -210,5 +210,60 @@ service cloud.firestore {
       allow update: if isManager();
       allow delete: if isSuperAdmin();
     }
+
+    // AI Audit Reports Collection: Viewers read, Managers write, Super Admin delete
+    match /auditReports/{reportId} {
+      allow read: if isViewer();
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Proposals Collection: Viewers read, Managers write, Super Admin delete
+    match /proposals/{proposalId} {
+      allow read: if isViewer();
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ROI Calculations Collection: Public create, Viewers read, Super Admin delete
+    match /roiCalculations/{calcId} {
+      allow create: if true;
+      allow read: if isViewer();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Outbound Logs Collections: Viewers read, Managers write
+    match /emailLogs/{logId} {
+      allow read: if isViewer();
+      allow create: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+    match /whatsappLogs/{logId} {
+      allow read: if isViewer();
+      allow create: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Dynamic website elements: Public read, Managers manage, Super Admin delete
+    match /faqs/{faqId} {
+      allow read: if true;
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+    match /testimonials/{testId} {
+      allow read: if true;
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+    match /caseStudies/{csId} {
+      allow read: if true;
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+    match /industries/{indId} {
+      allow read: if true;
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
   }
 }

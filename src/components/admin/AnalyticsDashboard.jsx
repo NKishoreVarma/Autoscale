@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase';
 
@@ -89,123 +89,165 @@ export default function AnalyticsDashboard() {
     'Business Automation',
     'Custom Systems'
   ];
-  const serviceCounts = defaultServices.reduce((acc, service) => {
-    acc[service] = leads.filter(l => l.service === service).length;
-    return acc;
-  }, {});
+  const serviceCounts = useMemo(() => {
+    return defaultServices.reduce((acc, service) => {
+      acc[service] = leads.filter(l => l.service === service).length;
+      return acc;
+    }, {});
+  }, [leads]);
   const totalLeads = leads.length || 1;
 
   // ──────────────────────────────────────────────
   // 2. Industry Distribution (from leads)
   // ──────────────────────────────────────────────
   const industries = ['Healthcare', 'Real Estate', 'Education', 'Ecommerce', 'Agencies', 'Legal', 'Other'];
-  const industryCounts = industries.reduce((acc, industry) => {
-    acc[industry] = leads.filter(l => {
-      if (industry === 'Healthcare') return l.industry === 'Healthcare' || l.industry === 'clinics';
-      if (industry === 'Legal') return l.industry === 'Legal' || l.industry === 'legal-firms';
-      return l.industry === industry;
-    }).length;
-    return acc;
-  }, {});
+  const industryCounts = useMemo(() => {
+    return industries.reduce((acc, industry) => {
+      acc[industry] = leads.filter(l => {
+        if (industry === 'Healthcare') return l.industry === 'Healthcare' || l.industry === 'clinics';
+        if (industry === 'Legal') return l.industry === 'Legal' || l.industry === 'legal-firms';
+        return l.industry === industry;
+      }).length;
+      return acc;
+    }, {});
+  }, [leads]);
 
   // ──────────────────────────────────────────────
   // 3. Monthly Lead Growth Timeline (Line Chart)
   // ──────────────────────────────────────────────
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const now = new Date();
-  const leadMonthlyMap = {};
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
-    leadMonthlyMap[label] = 0;
-  }
-  leads.forEach(lead => {
-    if (!lead.createdAt?.toDate) return;
-    const date = lead.createdAt.toDate();
-    const label = `${monthNames[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`;
-    if (label in leadMonthlyMap) leadMonthlyMap[label]++;
-  });
-  const monthlyLabels = Object.keys(leadMonthlyMap);
-  const monthlyCounts = Object.values(leadMonthlyMap);
-  const maxMonthlyCount = Math.max(...monthlyCounts, 1);
+  
+  const { monthlyLabels, monthlyCounts, maxMonthlyCount, leadPoints, leadPolyline } = useMemo(() => {
+    const leadMonthlyMap = {};
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
+      leadMonthlyMap[label] = 0;
+    }
+    leads.forEach(lead => {
+      if (!lead.createdAt?.toDate) return;
+      const date = lead.createdAt.toDate();
+      const label = `${monthNames[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`;
+      if (label in leadMonthlyMap) leadMonthlyMap[label]++;
+    });
+    const mLabels = Object.keys(leadMonthlyMap);
+    const mCounts = Object.values(leadMonthlyMap);
+    const mMax = Math.max(...mCounts, 1);
 
-  const chartWidth = 500;
-  const chartHeight = 160;
-  const paddingX = 40;
-  const paddingY = 20;
+    const chartWidth = 500;
+    const chartHeight = 160;
+    const paddingX = 40;
+    const paddingY = 20;
 
-  const leadPoints = monthlyCounts.map((count, idx) => {
-    const x = paddingX + (idx * (chartWidth - 2 * paddingX) / Math.max(monthlyCounts.length - 1, 1));
-    const y = chartHeight - paddingY - (count * (chartHeight - 2 * paddingY) / maxMonthlyCount);
-    return { x, y, count };
-  });
-  const leadPolyline = leadPoints.map(p => `${p.x},${p.y}`).join(' ');
+    const points = mCounts.map((count, idx) => {
+      const x = paddingX + (idx * (chartWidth - 2 * paddingX) / Math.max(mCounts.length - 1, 1));
+      const y = chartHeight - paddingY - (count * (chartHeight - 2 * paddingY) / mMax);
+      return { x, y, count };
+    });
+    const poly = points.map(p => `${p.x},${p.y}`).join(' ');
+
+    return {
+      monthlyLabels: mLabels,
+      monthlyCounts: mCounts,
+      maxMonthlyCount: mMax,
+      leadPoints: points,
+      leadPolyline: poly
+    };
+  }, [leads]);
 
   // ──────────────────────────────────────────────
   // 4. Monthly Revenue (Bar Chart from payments)
   // ──────────────────────────────────────────────
-  const revenueMonthlyMap = {};
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
-    revenueMonthlyMap[label] = 0;
-  }
-  payments.forEach(p => {
-    if (p.status !== 'Paid' || !p.createdAt?.toDate) return;
-    const d = p.createdAt.toDate();
-    const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
-    if (label in revenueMonthlyMap) revenueMonthlyMap[label] += (p.amount || 0);
-  });
-  const revenueLabels = Object.keys(revenueMonthlyMap);
-  const revenueValues = Object.values(revenueMonthlyMap);
-  const maxRevenueVal = Math.max(...revenueValues, 1);
+  const { revenueLabels, revenueValues, maxRevenueVal } = useMemo(() => {
+    const revenueMonthlyMap = {};
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
+      revenueMonthlyMap[label] = 0;
+    }
+    payments.forEach(p => {
+      if (p.status !== 'Paid' || !p.createdAt?.toDate) return;
+      const d = p.createdAt.toDate();
+      const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
+      if (label in revenueMonthlyMap) revenueMonthlyMap[label] += (p.amount || 0);
+    });
+    const rLabels = Object.keys(revenueMonthlyMap);
+    const rValues = Object.values(revenueMonthlyMap);
+    const rMax = Math.max(...rValues, 1);
+    return {
+      revenueLabels: rLabels,
+      revenueValues: rValues,
+      maxRevenueVal: rMax
+    };
+  }, [payments]);
 
   // ──────────────────────────────────────────────
   // 5. Project Status Distribution
   // ──────────────────────────────────────────────
-  const projectStatusMap = {};
-  projects.forEach(p => {
-    const st = p.status || 'Active';
-    projectStatusMap[st] = (projectStatusMap[st] || 0) + 1;
-  });
-  const projectStatusEntries = Object.entries(projectStatusMap).sort((a, b) => b[1] - a[1]);
-  const maxProjectStatusCount = projectStatusEntries.length > 0 ? projectStatusEntries[0][1] : 1;
+  const { projectStatusEntries, maxProjectStatusCount } = useMemo(() => {
+    const projectStatusMap = {};
+    projects.forEach(p => {
+      const st = p.status || 'Active';
+      projectStatusMap[st] = (projectStatusMap[st] || 0) + 1;
+    });
+    const entries = Object.entries(projectStatusMap).sort((a, b) => b[1] - a[1]);
+    const maxVal = entries.length > 0 ? entries[0][1] : 1;
+    return { projectStatusEntries: entries, maxProjectStatusCount: maxVal };
+  }, [projects]);
 
   // ──────────────────────────────────────────────
   // 6. Top Services Ranking
   // ──────────────────────────────────────────────
-  const serviceRanking = {};
-  leads.forEach(l => {
-    const svc = l.service || 'Other';
-    serviceRanking[svc] = (serviceRanking[svc] || 0) + 1;
-  });
-  const topServicesEntries = Object.entries(serviceRanking).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const maxServiceRank = topServicesEntries.length > 0 ? topServicesEntries[0][1] : 1;
+  const { topServicesEntries, maxServiceRank } = useMemo(() => {
+    const serviceRanking = {};
+    leads.forEach(l => {
+      const svc = l.service || 'Other';
+      serviceRanking[svc] = (serviceRanking[svc] || 0) + 1;
+    });
+    const entries = Object.entries(serviceRanking).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const maxVal = entries.length > 0 ? entries[0][1] : 1;
+    return { topServicesEntries: entries, maxServiceRank: maxVal };
+  }, [leads]);
 
   // ──────────────────────────────────────────────
   // 7. Client Retention (Active vs Paused vs Completed)
   // ──────────────────────────────────────────────
-  const clientStatusMap = {};
-  clients.forEach(c => {
-    const st = c.status || 'Active';
-    clientStatusMap[st] = (clientStatusMap[st] || 0) + 1;
-  });
-  const clientStatusEntries = Object.entries(clientStatusMap).sort((a, b) => b[1] - a[1]);
-  const maxClientStatus = clientStatusEntries.length > 0 ? clientStatusEntries[0][1] : 1;
+  const { clientStatusEntries, maxClientStatus } = useMemo(() => {
+    const clientStatusMap = {};
+    clients.forEach(c => {
+      const st = c.status || 'Active';
+      clientStatusMap[st] = (clientStatusMap[st] || 0) + 1;
+    });
+    const entries = Object.entries(clientStatusMap).sort((a, b) => b[1] - a[1]);
+    const maxVal = entries.length > 0 ? entries[0][1] : 1;
+    return { clientStatusEntries: entries, maxClientStatus: maxVal };
+  }, [clients]);
 
   // ──────────────────────────────────────────────
   // 8. Task Completion Rate
   // ──────────────────────────────────────────────
-  const totalTasks = tasks.length;
-  const doneTasks = tasks.filter(t => t.status === 'Done').length;
-  const taskCompletionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
-  const taskStatusMap = {};
-  tasks.forEach(t => {
-    const st = t.status || 'To Do';
-    taskStatusMap[st] = (taskStatusMap[st] || 0) + 1;
-  });
-  const taskStatusEntries = Object.entries(taskStatusMap).sort((a, b) => b[1] - a[1]);
-  const maxTaskStatus = taskStatusEntries.length > 0 ? taskStatusEntries[0][1] : 1;
+  const { totalTasks, doneTasks, taskCompletionRate, taskStatusEntries, maxTaskStatus } = useMemo(() => {
+    const total = tasks.length;
+    const done = tasks.filter(t => t.status === 'Done').length;
+    const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+    
+    const taskStatusMap = {};
+    tasks.forEach(t => {
+      const st = t.status || 'To Do';
+      taskStatusMap[st] = (taskStatusMap[st] || 0) + 1;
+    });
+    const entries = Object.entries(taskStatusMap).sort((a, b) => b[1] - a[1]);
+    const maxVal = entries.length > 0 ? entries[0][1] : 1;
+    
+    return {
+      totalTasks: total,
+      doneTasks: done,
+      taskCompletionRate: rate,
+      taskStatusEntries: entries,
+      maxTaskStatus: maxVal
+    };
+  }, [tasks]);
 
   if (loading) {
     return (

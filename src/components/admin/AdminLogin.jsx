@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { sendPasswordResetEmail, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
 import { auth } from '../../firebase';
+import { getFriendlyErrorMessage, triggerToast } from '../../utils/errorHandler';
 
 export default function AdminLogin() {
   const [activeTab, setActiveTab] = useState('email'); // email, google, phone
@@ -65,11 +66,12 @@ export default function AdminLogin() {
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       await login(email.trim(), password);
       // Don't navigate here — the useEffect above will redirect once auth state settles
+      triggerToast('Signed in successfully.', 'success');
     } catch (err) {
       console.error("Firebase Error:", err);
-      console.error("Code:", err.code);
-      console.error("Message:", err.message);
-      setError(`Login failed. Code: ${err.code || 'unknown'}. Message: ${err.message || 'Invalid admin credentials.'}`);
+      const msg = getFriendlyErrorMessage(err);
+      setError(msg);
+      triggerToast(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -89,36 +91,30 @@ export default function AdminLogin() {
     try {
       await sendPasswordResetEmail(auth, resetEmail.trim());
       setResetSuccess('Password reset link sent. Check your inbox.');
+      triggerToast('Password reset link sent successfully.', 'success');
       setResetEmail('');
     } catch (err) {
       console.error("Firebase Error:", err);
-      console.error("Code:", err.code);
-      console.error("Message:", err.message);
-      if (err.code === 'auth/user-not-found') {
-        setResetError('No account found with this email.');
-      } else if (err.code === 'auth/invalid-email') {
-        setResetError('Please enter a valid email address.');
-      } else if (err.code === 'auth/too-many-requests') {
-        setResetError('Too many requests. Please try again later.');
-      } else {
-        setResetError(`Failed to send reset link. Code: ${err.code || 'unknown'}. Message: ${err.message || err.toString()}`);
-      }
+      const msg = getFriendlyErrorMessage(err);
+      setResetError(msg);
+      triggerToast(msg, 'error');
     } finally {
       setResetLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    setError('');
     setLoading(true);
+    setError('');
     try {
       await loginWithGoogle();
       // Don't navigate here — the useEffect above will redirect once auth state settles
+      triggerToast('Signed in with Google successfully.', 'success');
     } catch (err) {
       console.error("Firebase Error:", err);
-      console.error("Code:", err.code);
-      console.error("Message:", err.message);
-      setError(`Google Sign-in failed. Code: ${err.code || 'unknown'}. Message: ${err.message || err.toString()}`);
+      const msg = getFriendlyErrorMessage(err);
+      setError(msg);
+      triggerToast(msg, 'error');
     } finally {
       setLoading(false);
     }

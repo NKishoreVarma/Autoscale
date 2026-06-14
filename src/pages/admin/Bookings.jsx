@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
@@ -30,12 +30,21 @@ export default function Bookings() {
   const [newTime, setNewTime] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(25);
+
+  // Reset page index on filter change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
   const isSuperAdmin = userRole === 'super_admin';
 
-  // Listen to bookings collection (replaces appointments)
+  // Listen to bookings collection (replaces appointments) with limit
   useEffect(() => {
     console.log('[Bookings] Subscribing to bookings real-time feed...');
-    const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(200));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
@@ -132,15 +141,24 @@ export default function Bookings() {
     }
   };
 
-  const filteredBookings = bookings.filter(b => {
-    const clientName = b.name || b.client || '';
-    const matchesSearch = 
-      clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      b.phone?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === '' || b.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredBookings = useMemo(() => {
+    return bookings.filter(b => {
+      const clientName = b.name || b.client || '';
+      const matchesSearch = 
+        clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.phone?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === '' || b.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [bookings, searchTerm, statusFilter]);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedBookings = useMemo(() => {
+    return filteredBookings.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredBookings, startIndex, itemsPerPage]);
+
+  const totalPages = Math.ceil(filteredBookings.length / itemsPerPage) || 1;
 
   return (
     <div className="flex-grow flex flex-col gap-8">
@@ -207,7 +225,7 @@ export default function Bookings() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-sm">
-                {filteredBookings.map(b => (
+                {paginatedBookings.map(b => (
                   <tr
                     key={b.id}
                     onClick={() => setSelectedBooking(b)}
@@ -229,6 +247,34 @@ export default function Bookings() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between text-xs text-gray-400 bg-white/[0.01]">
+                <div>
+                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredBookings.length)} of {filteredBookings.length} bookings
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-1.5 font-mono">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

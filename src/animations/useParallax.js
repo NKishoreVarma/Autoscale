@@ -19,13 +19,17 @@ export function useParallax(options = {}) {
     const el = ref.current;
     if (!el) return;
 
-    const handleMouseMove = (e) => {
+    let clientX = window.innerWidth / 2;
+    let clientY = window.innerHeight / 2;
+    let tick = false;
+
+    const updateParallax = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
 
       // Calculate relative position (-1 to 1) from screen center
-      const relX = (e.clientX - width / 2) / (width / 2);
-      const relY = (e.clientY - height / 2) / (height / 2);
+      const relX = (clientX - width / 2) / (width / 2);
+      const relY = (clientY - height / 2) / (height / 2);
 
       gsap.to(el, {
         x: relX * factorX,
@@ -33,9 +37,19 @@ export function useParallax(options = {}) {
         duration: 0.8,
         ease: 'power2.out',
       });
+      tick = false;
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
+    const handleMouseMove = (e) => {
+      clientX = e.clientX;
+      clientY = e.clientY;
+      if (!tick) {
+        requestAnimationFrame(updateParallax);
+        tick = true;
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
