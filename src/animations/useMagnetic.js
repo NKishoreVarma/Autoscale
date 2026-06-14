@@ -21,8 +21,13 @@ export function useMagnetic(options = {}) {
     const el = ref.current;
     if (!el) return;
 
+    let rect = el.getBoundingClientRect();
+
+    const updateRect = () => {
+      rect = el.getBoundingClientRect();
+    };
+
     const handleMouseMove = (e) => {
-      const rect = el.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
 
@@ -59,10 +64,14 @@ export function useMagnetic(options = {}) {
     };
 
     window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('scroll', updateRect, { passive: true });
+    window.addEventListener('resize', updateRect, { passive: true });
     el.addEventListener('mouseleave', handleMouseLeave);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('scroll', updateRect);
+      window.removeEventListener('resize', updateRect);
       el.removeEventListener('mouseleave', handleMouseLeave);
       gsap.killTweensOf(el);
     };
