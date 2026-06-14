@@ -7,6 +7,8 @@ import {
   Shield, Bell, CheckCircle, Lock, Building, Globe, Mail, PhoneCall, Cpu, Save, RefreshCw
 } from 'lucide-react';
 
+import { appConfig } from '../../config/appConfig';
+
 const TABS = [
   { id: 'company', label: 'Company Profile', icon: Building },
   { id: 'website', label: 'Website Settings', icon: Globe },
@@ -36,9 +38,9 @@ export default function AdminSettings() {
     twilioSid: 'ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
     twilioToken: '••••••••••••••••••••••••••••••••',
     twilioPhone: '+14155552671',
-    firebaseApiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyA...',
-    firebaseProjectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'autoscale-prod',
-    firebaseAppId: import.meta.env.VITE_FIREBASE_APP_ID || '1:123456:web:abcd'
+    firebaseApiKey: appConfig.firebase.apiKey || 'AIzaSyA...',
+    firebaseProjectId: appConfig.firebase.projectId || 'autoscale-prod',
+    firebaseAppId: appConfig.firebase.appId || '1:123456:web:abcd'
   });
 
   const isSuperAdmin = userRole === 'super_admin';

@@ -61,13 +61,27 @@ const TargetCursor = ({
     };
     startSpin();
 
-    const onMove = (e) => {
+    let clientX = window.innerWidth / 2;
+    let clientY = window.innerHeight / 2;
+    let tick = false;
+
+    const updateCursorPosition = () => {
       if (activeTargetRef.current) {
         const { x, y } = centerRef.current;
         moveCursor(x, y, true);
-        return;
+      } else {
+        moveCursor(clientX, clientY);
       }
-      moveCursor(e.clientX, e.clientY);
+      tick = false;
+    };
+
+    const onMove = (e) => {
+      clientX = e.clientX;
+      clientY = e.clientY;
+      if (!tick) {
+        requestAnimationFrame(updateCursorPosition);
+        tick = true;
+      }
     };
     window.addEventListener("mousemove", onMove, { passive: true });
 

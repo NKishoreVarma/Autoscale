@@ -1,45 +1,151 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, updateDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, addDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { ArrowLeft, ArrowRight, Check, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, User, Briefcase, Calendar, ShieldAlert } from 'lucide-react';
+import { calculateLeadScore } from './LeadsList';
+import { useAuth } from '../../context/AuthContext';
+import { logAuditAction } from '../../utils/auditLogger';
 
 const COLUMNS = [
   { id: 'New', name: 'New' },
   { id: 'Contacted', name: 'Contacted' },
-  { id: 'Meeting Scheduled', name: 'Meeting Scheduled' },
+  { id: 'Discovery', name: 'Discovery' },
   { id: 'Proposal Sent', name: 'Proposal Sent' },
+  { id: 'Negotiation', name: 'Negotiation' },
   { id: 'Won', name: 'Won' },
   { id: 'Lost', name: 'Lost' }
 ];
 
+const SCORE_COLORS = {
+  Cold: 'border-blue-500/20 text-blue-400 bg-blue-950/10',
+  Warm: 'border-amber-500/20 text-amber-400 bg-amber-950/10',
+  Hot: 'border-rose-500/20 text-rose-400 bg-rose-950/10 animate-pulse'
+};
+
 export default function PipelineBoard() {
-  const [leads, setLeads] = useState([]);
+  const { user: authUser, userRole } = useAuth();
+  const [contactForms, setContactForms] = useState([]);
+  const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Load contactForms and bookings in real-time
   useEffect(() => {
-    const leadsQuery = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(leadsQuery, (snapshot) => {
-      const list = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
-      setLeads(list);
-      setLoading(false);
-    });
+    const unsubContacts = onSnapshot(
+      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setContactForms(snap.docs.map(d => ({ id: d.id, _collection: 'contactForms', ...d.data() })));
+        setLoading(false);
+      },
+      (err) => console.error("Error fetching pipeline contact forms:", err)
+    );
 
-    return () => unsubscribe();
+    const unsubBookings = onSnapshot(
+      query(collection(db, 'bookings'), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setBookings(snap.docs.map(d => ({ id: d.id, _collection: 'bookings', ...d.data() })));
+        setLoading(false);
+      },
+      (err) => console.error("Error fetching pipeline bookings:", err)
+    );
+
+    return () => {
+      unsubContacts();
+      unsubBookings();
+    };
   }, []);
 
+  // Merge lists
+  const leads = React.useMemo(() => {
+    const list = [];
+
+    contactForms.forEach(c => {
+      list.push({
+        id: c.id,
+        name: c.name || '',
+        company: c.company || '',
+        email: c.email || '',
+        phone: c.phone || '',
+        service: c.service || 'Custom Systems',
+        industry: c.industry || 'Other',
+        message: c.message || '',
+        status: c.status || 'New',
+        createdAt: c.createdAt,
+        _collection: 'contactForms'
+      });
+    });
+
+    bookings.forEach(b => {
+      list.push({
+        id: b.id,
+        name: b.name || '',
+        company: b.company || '',
+        email: b.email || '',
+        phone: b.phone || '',
+        service: b.serviceRequested || b.service || 'Custom Systems',
+        industry: b.industry || 'Other',
+        message: b.message || '',
+        status: b.status || 'New',
+        createdAt: b.createdAt,
+        _collection: 'bookings'
+      });
+    });
+
+    return list;
+  }, [contactForms, bookings]);
+
+  // Transition lead stage
   const moveLead = async (leadId, currentStatus, direction) => {
+    const target = leads.find(l => l.id === leadId);
+    if (!target) return;
+
     const currentIndex = COLUMNS.findIndex(col => col.id === currentStatus);
-    let newIndex = currentIndex + direction;
+    const newIndex = currentIndex + direction;
 
     if (newIndex >= 0 && newIndex < COLUMNS.length) {
       const newStatus = COLUMNS[newIndex].id;
+      const collectionName = target._collection;
+
       try {
-        await updateDoc(doc(db, 'leads', leadId), { status: newStatus });
+        await updateDoc(doc(db, collectionName, leadId), { 
+          status: newStatus,
+          updatedAt: serverTimestamp()
+        });
+
+        // Add to emailLogs/whatsappLogs automatically if promoted
+        if (newStatus === 'Proposal Sent') {
+          // Log automated email sequence trigger
+          await addDoc(collection(db, 'emailLogs'), {
+            leadEmail: target.email || 'unknown',
+            leadName: target.name || 'Client',
+            subject: 'Proposal Issued for Autoscale Solutions',
+            body: `Hi ${target.name},\n\nWe have drafted a bespoke automation proposal for ${target.company || 'your business'}. Please review the options.`,
+            status: 'sent',
+            triggerEvent: 'Proposal Sent',
+            timestamp: serverTimestamp()
+          });
+
+          await addDoc(collection(db, 'whatsappLogs'), {
+            phone: target.phone || 'N/A',
+            name: target.name || 'Client',
+            templateUsed: 'Proposal Sent Template',
+            status: 'sent',
+            payload: `Your Autoscale proposal for ${target.service} has been successfully sent to ${target.email}.`,
+            timestamp: serverTimestamp()
+          });
+        }
+
+        // Log audit trail
+        await logAuditAction(
+          authUser?.email || 'admin@autoscale.systems',
+          userRole || 'admin',
+          'Updated Pipeline Stage',
+          collectionName,
+          leadId,
+          `Shifted lead "${target.name}" from status "${currentStatus}" to "${newStatus}"`
+        );
+
       } catch (err) {
-        console.error('Error shifting lead status:', err);
+        console.error('Error shifting lead pipeline status:', err);
       }
     }
   };
@@ -54,23 +160,26 @@ export default function PipelineBoard() {
 
   return (
     <div className="flex-grow flex flex-col gap-8 h-full">
-      
       {/* Title Header */}
       <div>
         <span className="text-[10px] font-bold tracking-[0.25em] text-gray-500 uppercase">
-          PIPELINE MANAGEMENT
+          SALES PIPELINE ENGINE
         </span>
         <h1 className="text-3xl font-normal tracking-tight text-white uppercase mt-1">
-          KANBAN BOARD
+          GROWTH PIPELINE
         </h1>
       </div>
 
       {/* Kanban Scroll Wrapper */}
       <div className="flex-grow overflow-x-auto pb-4 no-scrollbar">
-        <div className="flex gap-4 min-w-[1200px] h-full items-stretch">
-          
+        <div className="flex gap-4 min-w-[1400px] h-full items-stretch">
           {COLUMNS.map((column) => {
-            const columnLeads = leads.filter(l => (l.status || 'New') === column.id);
+            const columnLeads = leads.filter(l => {
+              // Normalize status mapping
+              const s = l.status || 'New';
+              if (s === 'Pending' || s === 'Scheduled') return column.id === 'New';
+              return s === column.id;
+            });
 
             return (
               <div 
@@ -102,7 +211,7 @@ export default function PipelineBoard() {
                         {/* Internal line border */}
                         <div className="absolute inset-0 border border-transparent rounded-lg group-hover:border-white/5 pointer-events-none" />
 
-                        <div className="flex flex-col gap-1.5">
+                        <div className="flex flex-col gap-2">
                           <div className="flex justify-between items-start">
                             <span className="text-xs font-bold text-white truncate max-w-[150px]">
                               {lead.name}
@@ -113,11 +222,16 @@ export default function PipelineBoard() {
                           </div>
                           
                           <div className="text-[11px] text-gray-400 font-light truncate">
-                            {lead.company}
+                            {lead.company || '—'}
                           </div>
 
-                          <div className="text-[9px] font-bold text-gray-400 tracking-wider uppercase border border-white/10 px-2 py-0.5 rounded w-fit mt-1 bg-white/5">
-                            {lead.service}
+                          <div className="flex flex-wrap gap-1.5 items-center mt-1">
+                            <span className="text-[9px] font-bold text-gray-400 tracking-wider uppercase border border-white/10 px-2 py-0.5 rounded bg-white/5">
+                              {lead.service}
+                            </span>
+                            <span className={`text-[8px] font-bold tracking-widest px-1.5 py-0.5 rounded border uppercase ${SCORE_COLORS[calculateLeadScore(lead)] || 'border-white/10 text-gray-300'}`}>
+                              {calculateLeadScore(lead)}
+                            </span>
                           </div>
                         </div>
 
@@ -133,7 +247,7 @@ export default function PipelineBoard() {
                           </button>
 
                           <span className="text-[8px] font-bold tracking-widest text-gray-500 uppercase">
-                            Transition Stage
+                            Transition
                           </span>
 
                           {/* Move Right */}
@@ -153,10 +267,8 @@ export default function PipelineBoard() {
               </div>
             );
           })}
-
         </div>
       </div>
-
     </div>
   );
 }

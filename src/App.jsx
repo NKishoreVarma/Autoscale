@@ -1,48 +1,70 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import AuthDebug from './components/AuthDebug';
 
-// Public Components
+// Light Core Components (Static)
 import Navbar from './components/Navbar';
-import Hero from './components/Hero';
-import Section2 from './components/Section2';
-import RevenueLeakMap from './components/RevenueLeakMap';
-import IndustrySolutions from './components/IndustrySolutions';
-import SolutionsLibrary from './components/SolutionsLibrary';
-import CaseStudies from './components/CaseStudies';
-import ROICalculator from './components/ROICalculator';
-import Timeline from './components/Timeline';
-import CTA from './components/CTA';
-import Footer from './components/Footer';
+import ProtectedRoute from './components/ProtectedRoute';
+import ClientProtectedRoute from './components/ClientProtectedRoute';
 import LeadFormModal from './components/LeadFormModal';
 import TargetCursor from './components/cursor/TargetCursor';
+import Footer from './components/Footer';
+import Toast from './components/ui/Toast';
 
-// Admin Components
-import ProtectedRoute from './components/ProtectedRoute';
-import AdminLayout from './components/admin/AdminLayout';
-import AdminLogin from './components/admin/AdminLogin';
-import DashboardOverview from './components/admin/DashboardOverview';
-import LeadsList from './components/admin/LeadsList';
-import AnalyticsDashboard from './components/admin/AnalyticsDashboard';
-import AdminSettings from './components/admin/AdminSettings';
+// Lazy Public Components
+const Hero = React.lazy(() => import('./components/Hero'));
+const Section2 = React.lazy(() => import('./components/Section2'));
+const RevenueLeakMap = React.lazy(() => import('./components/RevenueLeakMap'));
+const IndustrySolutions = React.lazy(() => import('./components/IndustrySolutions'));
+const SolutionsLibrary = React.lazy(() => import('./components/SolutionsLibrary'));
+const CaseStudies = React.lazy(() => import('./components/CaseStudies'));
+const ROICalculator = React.lazy(() => import('./components/ROICalculator'));
+const Timeline = React.lazy(() => import('./components/Timeline'));
+const Testimonials = React.lazy(() => import('./components/Testimonials'));
+const FAQs = React.lazy(() => import('./components/FAQs'));
+const CTA = React.lazy(() => import('./components/CTA'));
 
-// New Admin Pages
-import Clients from './pages/admin/Clients';
-import Projects from './pages/admin/Projects';
-import Services from './pages/admin/Services';
-import Bookings from './pages/admin/Bookings';
-import ContactForms from './pages/admin/ContactForms';
-import Users from './pages/admin/Users';
-import NotificationsPage from './pages/admin/NotificationsPage';
-import Team from './pages/admin/Team';
-import Invoices from './pages/admin/Invoices';
-import Tasks from './pages/admin/Tasks';
+// Lazy Admin Layout / Setup Components
+const AdminLayout = React.lazy(() => import('./components/admin/AdminLayout'));
+const AdminLogin = React.lazy(() => import('./components/admin/AdminLogin'));
+const DashboardOverview = React.lazy(() => import('./components/admin/DashboardOverview'));
+const LeadsList = React.lazy(() => import('./components/admin/LeadsList'));
+const AnalyticsDashboard = React.lazy(() => import('./components/admin/AnalyticsDashboard'));
+const AdminSettings = React.lazy(() => import('./components/admin/AdminSettings'));
+const PipelineBoard = React.lazy(() => import('./components/admin/PipelineBoard'));
 
-// Client Portal Pages
-import ClientProtectedRoute from './components/ClientProtectedRoute';
-import ClientLogin from './pages/client/ClientLogin';
-import ClientDashboard from './pages/client/ClientDashboard';
+// Lazy Admin Pages
+const Clients = React.lazy(() => import('./pages/admin/Clients'));
+const Projects = React.lazy(() => import('./pages/admin/Projects'));
+const Services = React.lazy(() => import('./pages/admin/Services'));
+const Bookings = React.lazy(() => import('./pages/admin/Bookings'));
+const ContactForms = React.lazy(() => import('./pages/admin/ContactForms'));
+const Users = React.lazy(() => import('./pages/admin/Users'));
+const NotificationsPage = React.lazy(() => import('./pages/admin/NotificationsPage'));
+const Team = React.lazy(() => import('./pages/admin/Team'));
+const Invoices = React.lazy(() => import('./pages/admin/Invoices'));
+const Tasks = React.lazy(() => import('./pages/admin/Tasks'));
+const AIAudit = React.lazy(() => import('./pages/admin/AIAudit'));
+const ProposalGenerator = React.lazy(() => import('./pages/admin/ProposalGenerator'));
+const CommunicationHub = React.lazy(() => import('./pages/admin/CommunicationHub'));
+const WebsiteCMS = React.lazy(() => import('./pages/admin/WebsiteCMS'));
+
+// Lazy Client Pages
+const ClientLogin = React.lazy(() => import('./pages/client/ClientLogin'));
+const ClientDashboard = React.lazy(() => import('./pages/client/ClientDashboard'));
+
+// Sleek loading fallback for code-split lazy loading
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-4">
+      <div className="w-8 h-8 border-[2px] border-[#5E0ED7]/30 border-t-[#5E0ED7] rounded-full animate-spin" />
+      <span className="text-[10px] text-gray-500 font-bold tracking-[0.2em] uppercase animate-pulse">
+        Initializing Autoscale...
+      </span>
+    </div>
+  );
+}
 
 // Public Homepage Sub-Layout
 function PublicHome() {
@@ -85,6 +107,12 @@ function PublicHome() {
       {/* 7. Dedicated ROI Calculator */}
       <ROICalculator />
 
+      {/* 7a. Client Testimonials Carousel */}
+      <Testimonials />
+
+      {/* 7b. Common Queries FAQ Grid */}
+      <FAQs />
+
       {/* 8. Final CTA Banner */}
       <CTA />
 
@@ -100,22 +128,39 @@ function PublicHome() {
 export default function App() {
   const videoRef = useRef(null);
   const navigate = useNavigate();
-  const location = useLocation();
+  const [isVideoInit, setIsVideoInit] = useState(false);
   const { user, isAdmin, userRole, loading: authLoading } = useAuth();
 
+  // Defer background video load until after first paint
   useEffect(() => {
+    setIsVideoInit(true);
+  }, []);
+
+  // Control playback based on page visibility to optimize resource usage
+  useEffect(() => {
+    if (!isVideoInit) return;
     const video = videoRef.current;
     if (!video) return;
 
-    const playVideo = async () => {
-      try {
-        await video.play();
-      } catch (err) {
-        console.warn('Autoplay prevented or failed:', err);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        video.pause();
+      } else {
+        video.play().catch(err => console.warn('Play interrupted on tab reveal:', err));
       }
     };
-    playVideo();
-  }, []);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Initial play attempt
+    if (!document.hidden) {
+      video.play().catch(err => console.warn('Background video play failed:', err));
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isVideoInit]);
 
   // STEP 5: Global keyboard shortcut — works from ANY page
   useEffect(() => {
@@ -132,20 +177,22 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen text-white selection:bg-white selection:text-black overflow-x-hidden bg-transparent">
-      {/* Global Video Background */}
-      <div className="fixed inset-0 z-0 overflow-hidden">
-        <video
-          ref={videoRef}
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ opacity: 0.28 }}
-        >
-          <source src="/silk-1781249661241.webm" type="video/webm" />
-        </video>
+      {/* Global Video Background with visibility control and poster fallback */}
+      <div className="fixed inset-0 z-0 overflow-hidden bg-black">
+        {isVideoInit && (
+          <video
+            ref={videoRef}
+            loop
+            muted
+            playsInline
+            preload="metadata"
+            poster="/assets/background-poster.webp"
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{ opacity: 0.28 }}
+          >
+            <source src="/silk-1781249661241.webm" type="video/webm" />
+          </video>
+        )}
       </div>
 
       {/* Global Dark Overlay */}
@@ -169,56 +216,66 @@ export default function App() {
 
       {/* Website Content */}
       <div className="relative z-10">
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<PublicHome />} />
-          <Route path="/admin/login" element={<AdminLogin />} />
+        <Suspense fallback={<LoadingFallback />}>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<PublicHome />} />
+            <Route path="/admin/login" element={<AdminLogin />} />
 
-          {/* Client Portal Routes */}
-          <Route path="/client/login" element={<ClientLogin />} />
-          <Route 
-            path="/client/dashboard" 
-            element={
-              <ClientProtectedRoute>
-                <ClientDashboard />
-              </ClientProtectedRoute>
-            } 
-          />
+            {/* Client Portal Routes */}
+            <Route path="/client/login" element={<ClientLogin />} />
+            <Route 
+              path="/client/dashboard" 
+              element={
+                <ClientProtectedRoute>
+                  <ClientDashboard />
+                </ClientProtectedRoute>
+              } 
+            />
 
-          {/* Protected Admin Routes */}
-          <Route 
-            path="/admin/*" 
-            element={
-              <ProtectedRoute>
-                <AdminLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/admin/overview" replace />} />
-            <Route path="dashboard" element={<Navigate to="/admin/overview" replace />} />
-            <Route path="overview" element={<DashboardOverview />} />
-            <Route path="leads" element={<LeadsList />} />
-            <Route path="clients" element={<Clients />} />
-            <Route path="projects" element={<Projects />} />
-            <Route path="tasks" element={<Tasks />} />
-            <Route path="team" element={<Team />} />
-            <Route path="invoices" element={<Invoices />} />
-            <Route path="services" element={<Services />} />
-            <Route path="bookings" element={<Bookings />} />
-            <Route path="contact-forms" element={<ContactForms />} />
-            <Route path="analytics" element={<AnalyticsDashboard />} />
-            <Route path="users" element={<Users />} />
-            <Route path="notifications" element={<NotificationsPage />} />
-            <Route path="settings" element={<AdminSettings />} />
-          </Route>
+            {/* Protected Admin Routes */}
+            <Route 
+              path="/admin/*" 
+              element={
+                <ProtectedRoute>
+                  <AdminLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="/admin/overview" replace />} />
+              <Route path="dashboard" element={<Navigate to="/admin/overview" replace />} />
+              <Route path="overview" element={<DashboardOverview />} />
+              <Route path="pipeline" element={<PipelineBoard />} />
+              <Route path="leads" element={<LeadsList />} />
+              <Route path="audit" element={<AIAudit />} />
+              <Route path="proposals" element={<ProposalGenerator />} />
+              <Route path="clients" element={<Clients />} />
+              <Route path="projects" element={<Projects />} />
+              <Route path="tasks" element={<Tasks />} />
+              <Route path="team" element={<Team />} />
+              <Route path="invoices" element={<Invoices />} />
+              <Route path="communication" element={<CommunicationHub />} />
+              <Route path="cms" element={<WebsiteCMS />} />
+              <Route path="services" element={<Services />} />
+              <Route path="bookings" element={<Bookings />} />
+              <Route path="contact-forms" element={<ContactForms />} />
+              <Route path="analytics" element={<AnalyticsDashboard />} />
+              <Route path="users" element={<Users />} />
+              <Route path="notifications" element={<NotificationsPage />} />
+              <Route path="settings" element={<AdminSettings />} />
+            </Route>
 
-          {/* Fallback Catch-all Redirect */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Fallback Catch-all Redirect */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
 
       {/* STEP 6: Dev-only Debug Panel */}
       {import.meta.env.DEV && <AuthDebug />}
+
+      {/* Global Toast Notifier */}
+      <Toast />
     </div>
   );
 }

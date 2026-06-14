@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { sanitizeInput } from '../../utils/sanitizer';
 import {
   Search, X, Plus, Building, User, Mail, Phone, Globe, IndianRupee,
   FileText, MessageSquare, CreditCard, FolderKanban, Trash2, Edit3, ChevronDown
@@ -52,6 +53,15 @@ export default function Clients() {
   const [statusFilter, setStatusFilter] = useState('');
   const [industryFilter, setIndustryFilter] = useState('');
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(15);
+
+  // Reset page index on filter change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, industryFilter]);
+
   // Detail panel sub-data
   const [projects, setProjects] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -60,7 +70,7 @@ export default function Clients() {
 
   // Main clients listener
   useEffect(() => {
-    const q = query(collection(db, 'clients'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'clients'), orderBy('createdAt', 'desc'), limit(200));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = [];
       snapshot.forEach((doc) => {
@@ -106,16 +116,20 @@ export default function Clients() {
       })
     );
 
-    // Notes for this client
+    // Notes for this client - Sorted in memory to bypass composite index requirement
     const notesQuery = query(
       collection(db, 'notes'),
-      where('clientId', '==', selectedClient.id),
-      orderBy('createdAt', 'desc')
+      where('clientId', '==', selectedClient.id)
     );
     unsubscribers.push(
       onSnapshot(notesQuery, (snapshot) => {
         const list = [];
         snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+        list.sort((a, b) => {
+          const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+          const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+          return bTime - aTime;
+        });
         setNotes(list);
       })
     );
@@ -131,8 +145,13 @@ export default function Clients() {
     try {
       const docRef = await addDoc(collection(db, 'clients'), {
         ...formData,
-        company: formData.companyName.trim(),
-        contactPerson: formData.ownerName.trim(),
+        companyName: sanitizeInput(formData.companyName.trim()),
+        ownerName: sanitizeInput(formData.ownerName.trim()),
+        email: sanitizeInput(formData.email.trim()),
+        phone: sanitizeInput(formData.phone.trim()),
+        website: sanitizeInput(formData.website.trim()),
+        company: sanitizeInput(formData.companyName.trim()),
+        contactPerson: sanitizeInput(formData.ownerName.trim()),
         contractValue: Number(formData.contractValue) || 0,
         createdAt: serverTimestamp(),
         createdBy: authUser?.email || 'admin',
@@ -261,7 +280,7 @@ export default function Clients() {
     try {
       await addDoc(collection(db, 'notes'), {
         clientId: selectedClient.id,
-        content: newNote.trim(),
+        content: sanitizeInput(newNote.trim()),
         createdAt: serverTimestamp(),
         authorName: authUser?.email || 'Admin',
       });
@@ -271,16 +290,25 @@ export default function Clients() {
     }
   };
 
-  // Filter logic
-  const filteredClients = clients.filter((client) => {
-    const matchesSearch =
-      client.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      client.ownerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      client.email?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === '' || client.status === statusFilter;
-    const matchesIndustry = industryFilter === '' || client.industry === industryFilter;
-    return matchesSearch && matchesStatus && matchesIndustry;
-  });
+  const filteredClients = useMemo(() => {
+    return clients.filter((client) => {
+      const matchesSearch =
+        client.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        client.ownerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        client.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === '' || client.status === statusFilter;
+      const matchesIndustry = industryFilter === '' || client.industry === industryFilter;
+
+      return matchesSearch && matchesStatus && matchesIndustry;
+    });
+  }, [clients, searchTerm, statusFilter, industryFilter]);
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedClients = useMemo(() => {
+    return filteredClients.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredClients, startIndex, itemsPerPage]);
+
+  const totalPages = Math.ceil(filteredClients.length / itemsPerPage) || 1;
 
   return (
     <div className="flex-grow flex flex-col gap-8">
@@ -364,7 +392,7 @@ export default function Clients() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-sm">
-                {filteredClients.map((client) => (
+                {paginatedClients.map((client) => (
                   <tr
                     key={client.id}
                     onClick={() => setSelectedClient(client)}
@@ -397,6 +425,34 @@ export default function Clients() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between text-xs text-gray-400 bg-white/[0.01]">
+                <div>
+                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredClients.length)} of {filteredClients.length} clients
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-3 py-1.5 font-mono">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    className="px-3 py-1.5 rounded border border-white/10 bg-black hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

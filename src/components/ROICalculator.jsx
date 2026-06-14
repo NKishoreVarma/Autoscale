@@ -1,4 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Save, Check } from 'lucide-react';
 
 function AnimatedCounter({ value, prefix = "", suffix = "" }) {
   const [displayVal, setDisplayVal] = useState(0);
@@ -38,15 +41,44 @@ function AnimatedCounter({ value, prefix = "", suffix = "" }) {
 }
 
 export default function ROICalculator() {
-  const [leadVolume, setLeadVolume] = useState(500);
-  const [leadValue, setLeadValue] = useState(5000);
-  const [hoursWasted, setHoursWasted] = useState(80);
+  const [teamSize, setTeamSize] = useState(15);
+  const [hoursLost, setHoursLost] = useState(6); // hours lost per week per employee
+  const [leadVolume, setLeadVolume] = useState(250);
 
-  // Math equations
-  const hoursRecovered = hoursWasted; 
-  // 15% estimated lead leakage recovered + ₹450/hr operational labor recovery
-  const monthlySavings = Math.floor((leadVolume * leadValue * 0.15) + (hoursWasted * 450));
-  const annualSavings = monthlySavings * 12;
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Calculations
+  // Monthly Hours saved = Team Size * Hours Lost * 4 weeks
+  const monthlyHoursSaved = useMemo(() => teamSize * hoursLost * 4, [teamSize, hoursLost]);
+  
+  // Labor Rate = ₹450 / hour. Monthly Savings = hours saved * ₹450
+  const monthlySavings = useMemo(() => monthlyHoursSaved * 450, [monthlyHoursSaved]);
+  const annualSavings = useMemo(() => monthlySavings * 12, [monthlySavings]);
+  
+  // Revenue Opportunity = 15% lead leakage recovered * average contract value ₹5000 * leadVolume
+  const revenueOpportunity = useMemo(() => Math.floor(leadVolume * 0.15 * 5000), [leadVolume]);
+
+  const handleSaveReport = useCallback(async () => {
+    setSaving(true);
+    try {
+      await addDoc(collection(db, 'roiCalculations'), {
+        teamSize,
+        hoursLost,
+        leadVolume,
+        monthlySavings,
+        annualSavings,
+        revenueOpportunity,
+        createdAt: serverTimestamp()
+      });
+      setSaving(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      console.error("Error saving ROI report:", err);
+      setSaving(false);
+    }
+  }, [teamSize, hoursLost, leadVolume, monthlySavings, annualSavings, revenueOpportunity]);
 
   return (
     <section id="roi-calculator" className="section-container relative w-full bg-transparent border-t border-white/10">
@@ -67,7 +99,49 @@ export default function ROICalculator() {
           {/* Left Side: Sliders */}
           <div className="col-span-1 lg:col-span-6 p-8 rounded-[24px] border border-white/5 bg-white/[0.01] flex flex-col gap-8">
             
-            {/* Input 1 */}
+            {/* Input 1: Team Size */}
+            <div className="flex flex-col gap-4">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-bold tracking-wider text-gray-300 uppercase">
+                  Team Size (FTEs)
+                </label>
+                <span className="text-xs font-mono text-white bg-white/5 border border-white/10 px-2.5 py-0.5 rounded">
+                  {teamSize} Members
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="250"
+                step="1"
+                value={teamSize}
+                onChange={(e) => setTeamSize(Number(e.target.value))}
+                className="w-full cursor-pointer cursor-target"
+              />
+            </div>
+
+            {/* Input 2: Weekly Hours Wasted per FTE */}
+            <div className="flex flex-col gap-4">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-bold tracking-wider text-gray-300 uppercase">
+                  Weekly Hours Wasted / FTE
+                </label>
+                <span className="text-xs font-mono text-white bg-white/5 border border-white/10 px-2.5 py-0.5 rounded">
+                  {hoursLost} Hours / Week
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="40"
+                step="1"
+                value={hoursLost}
+                onChange={(e) => setHoursLost(Number(e.target.value))}
+                className="w-full cursor-pointer cursor-target"
+              />
+            </div>
+
+            {/* Input 3: Monthly Lead Volume */}
             <div className="flex flex-col gap-4">
               <div className="flex justify-between items-center">
                 <label className="text-xs font-bold tracking-wider text-gray-300 uppercase">
@@ -79,56 +153,24 @@ export default function ROICalculator() {
               </div>
               <input
                 type="range"
-                min="50"
-                max="5000"
-                step="50"
+                min="10"
+                max="2500"
+                step="10"
                 value={leadVolume}
                 onChange={(e) => setLeadVolume(Number(e.target.value))}
                 className="w-full cursor-pointer cursor-target"
               />
             </div>
 
-            {/* Input 2 */}
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center">
-                <label className="text-xs font-bold tracking-wider text-gray-300 uppercase">
-                  Average Lead Value
-                </label>
-                <span className="text-xs font-mono text-white bg-white/5 border border-white/10 px-2.5 py-0.5 rounded">
-                  ₹{leadValue.toLocaleString('en-IN')}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="500"
-                max="50000"
-                step="500"
-                value={leadValue}
-                onChange={(e) => setLeadValue(Number(e.target.value))}
-                className="w-full cursor-pointer cursor-target"
-              />
-            </div>
-
-            {/* Input 3 */}
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-between items-center">
-                <label className="text-xs font-bold tracking-wider text-gray-300 uppercase">
-                  Monthly Hours Wasted
-                </label>
-                <span className="text-xs font-mono text-white bg-white/5 border border-white/10 px-2.5 py-0.5 rounded">
-                  {hoursWasted} Hours
-                </span>
-              </div>
-              <input
-                type="range"
-                min="10"
-                max="500"
-                step="10"
-                value={hoursWasted}
-                onChange={(e) => setHoursWasted(Number(e.target.value))}
-                className="w-full cursor-pointer cursor-target"
-              />
-            </div>
+            {/* Save Button */}
+            <button
+              onClick={handleSaveReport}
+              disabled={saving}
+              className="mt-4 w-full bg-white text-black text-xs font-bold tracking-wider rounded-lg py-3 hover:bg-gray-100 transition uppercase flex items-center justify-center gap-2"
+            >
+              {saved ? <Check className="w-4 h-4 text-emerald-600" /> : <Save className="w-4 h-4 text-[#5E0ED7]" />}
+              <span>{saved ? 'Calculation Saved to database' : saving ? 'Saving...' : 'Save ROI Report'}</span>
+            </button>
 
           </div>
 
@@ -144,7 +186,7 @@ export default function ROICalculator() {
                 <AnimatedCounter value={monthlySavings} prefix="₹" />
               </div>
               <span className="text-[9px] font-bold tracking-widest text-gray-500 uppercase mt-1">
-                Estimated overhead + leakage reclaimed
+                Labor recovery valued at ₹450/hour
               </span>
             </div>
 
@@ -153,24 +195,24 @@ export default function ROICalculator() {
               <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">
                 Annual Savings Potential
               </span>
-              <div className="text-3xl font-semibold text-white mt-2 font-mono">
+              <div className="text-3xl font-semibold text-[#5E0ED7] mt-2 font-mono">
                 <AnimatedCounter value={annualSavings} prefix="₹" />
               </div>
               <span className="text-[9px] font-bold tracking-widest text-gray-500 uppercase mt-1">
-                Projected twelve-month business savings
+                Projected twelve-month operational recovery
               </span>
             </div>
 
-            {/* Output 3: Hours Recovered */}
+            {/* Output 3: Revenue Opportunity */}
             <div className="p-6 rounded-2xl border border-white/5 bg-white/[0.01] flex flex-col justify-between h-[120px]">
               <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">
-                Hours Recovered
+                Revenue Opportunity
               </span>
               <div className="text-3xl font-semibold text-white mt-2 font-mono">
-                <AnimatedCounter value={hoursRecovered} suffix=" Hrs / Mo" />
+                <AnimatedCounter value={revenueOpportunity} prefix="₹" />
               </div>
               <span className="text-[9px] font-bold tracking-widest text-gray-500 uppercase mt-1">
-                Time redirected to core business operations
+                Value of reclaiming 15% lead leakage
               </span>
             </div>
 
