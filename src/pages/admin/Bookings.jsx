@@ -1,10 +1,11 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
 import {
-  Search, X, Check, Calendar, Trash2, Clock, Mail, Phone, User, Edit2, AlertCircle, CheckCircle2
+Search, X, Check, Calendar, Trash2, Clock, Mail, Phone, User, Edit2, AlertCircle, CheckCircle2
 } from 'lucide-react';
 
 const STATUS_COLORS = {
@@ -43,13 +44,19 @@ export default function Bookings() {
 
   // Listen to bookings collection (replaces appointments) with limit
   useEffect(() => {
-    console.log('[Bookings] Subscribing to bookings real-time feed...');
-    const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(200));
+    console.log('[Bookings] Subscribing to leads real-time feed for Book Audits...');
+    const q = query(collection(db, 'leads'), where('leadSource', '==', 'Book Audit'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      list.sort((a, b) => {
+        const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+        const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+        return bTime - aTime;
+      });
+      setBookings(list);
       setLoading(false);
     }, (err) => {
-      console.error('Error listening to bookings:', err);
+      console.error('Error listening to leads:', err);
       setLoading(false);
     });
     return () => unsubscribe();
@@ -57,7 +64,7 @@ export default function Bookings() {
 
   const handleUpdateStatus = async (bookingId, newStatus) => {
     try {
-      await updateDoc(doc(db, 'bookings', bookingId), {
+      await updateDoc(doc(db, 'leads', bookingId), {
         status: newStatus,
         updatedAt: serverTimestamp()
       });
@@ -67,7 +74,8 @@ export default function Bookings() {
         userProfile?.email || 'admin@autoscale.systems',
         userRole || 'admin',
         `Updated Booking Status`,
-        'bookings',
+        'leads',
+        bookingId,
         `Changed status of booking for ${target?.name || target?.client || 'Client'} to ${newStatus}`
       );
 
@@ -85,7 +93,7 @@ export default function Bookings() {
 
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'bookings', selectedBooking.id), {
+      await updateDoc(doc(db, 'leads', selectedBooking.id), {
         preferredDate: newDate, // Map to spec field preferredDate
         date: newDate,          // Keep fallback date field for UI
         time: newTime,
@@ -97,7 +105,8 @@ export default function Bookings() {
         userProfile?.email || 'admin@autoscale.systems',
         userRole || 'admin',
         `Scheduled Booking`,
-        'bookings',
+        'leads',
+        selectedBooking.id,
         `Scheduled booking for ${selectedBooking.name || selectedBooking.client || 'Client'} to ${newDate} at ${newTime}`
       );
 
@@ -118,20 +127,21 @@ export default function Bookings() {
 
   const handleDeleteBooking = async (bookingId) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can delete records.');
+      triggerToast('Access Denied: Only Super Admin can delete records.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this booking record?')) return;
 
     try {
       const target = bookings.find(b => b.id === bookingId);
-      await deleteDoc(doc(db, 'bookings', bookingId));
+      await deleteDoc(doc(db, 'leads', bookingId));
       
       await logAuditAction(
         userProfile?.email || 'super_admin@autoscale.systems',
         userRole || 'super_admin',
         `Deleted Booking`,
-        'bookings',
+        'leads',
+        bookingId,
         `Deleted booking record for ${target?.name || target?.client || 'Client'}`
       );
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
@@ -63,12 +64,25 @@ export default function Footer() {
 
         {/* Bottom Block */}
         <div className="border-t border-white/5 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-600">
-          <span>
-            &copy; {currentYear} AUTOSCALE SYSTEMS PVT LTD. ALL RIGHTS RESERVED.
-          </span>
+          <div className="flex items-center gap-4">
+            <span>
+              &copy; {currentYear} AUTOSCALE SYSTEMS PVT LTD. ALL RIGHTS RESERVED.
+            </span>
+            <a 
+              href="https://linkedin.com/company/autoscale" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="cursor-target text-gray-500 hover:text-white transition duration-200 flex items-center gap-1 font-mono text-[10px]"
+            >
+              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current" xmlns="http://www.w3.org/2000/svg">
+                <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+              </svg>
+              <span>LINKEDIN</span>
+            </a>
+          </div>
           <div className="flex items-center gap-6">
-            <a href="#" className="cursor-target hover:text-white transition duration-200">PRIVACY</a>
-            <a href="#" className="cursor-target hover:text-white transition duration-200">TERMS</a>
+            <Link to="/privacy" className="cursor-target hover:text-white transition duration-200">PRIVACY</Link>
+            <Link to="/terms" className="cursor-target hover:text-white transition duration-200">TERMS</Link>
           </div>
         </div>
 

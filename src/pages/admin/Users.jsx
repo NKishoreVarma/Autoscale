@@ -1,10 +1,11 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
 import {
-  Users as UsersIcon, Plus, X, Shield, ShieldCheck, Trash2, Edit2, Key, Lock, Mail
+Users as UsersIcon, Plus, X, Shield, ShieldCheck, Trash2, Edit2, Key, Lock, Mail
 } from 'lucide-react';
 
 const ROLES = [
@@ -100,10 +101,10 @@ export default function Users() {
       setEmail('');
       setDisplayName('');
       setRole('viewer');
-      alert('User clearance document provisioned successfully!');
+      triggerToast('User clearance document provisioned successfully!', 'success');
     } catch (err) {
       console.error('Error inviting user:', err);
-      alert('Failed to add user. Ensure correct Firestore permissions.');
+      triggerToast('Failed to add user. Ensure correct Firestore permissions.', 'error');
     } finally {
       setSaving(false);
     }
@@ -155,11 +156,11 @@ export default function Users() {
 
   const handleDeleteUser = async (usrId, usrEmail) => {
     if (usrEmail === 'kishorevarma2205@gmail.com') {
-      alert('Forbidden: Cannot remove the primary Super Admin profile.');
+      triggerToast('Forbidden: Cannot remove the primary Super Admin profile.', 'error');
       return;
     }
     if (usrId === userProfile?.id) {
-      alert('Forbidden: Cannot remove your own active credentials.');
+      triggerToast('Forbidden: Cannot remove your own active credentials.', 'error');
       return;
     }
     if (!window.confirm(`Are you sure you want to revoke clearances for ${usrEmail}?`)) return;

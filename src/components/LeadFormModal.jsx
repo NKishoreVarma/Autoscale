@@ -4,6 +4,9 @@ import { X, Check } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { sanitizeInput } from '../utils/sanitizer';
+import { emailService } from '../utils/emailService';
+import { whatsappService } from '../utils/whatsappService';
+import { calendarService } from '../utils/calendarService';
 
 export default function LeadFormModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -86,22 +89,37 @@ export default function LeadFormModal() {
       const sanitizedCompany = sanitizeInput(form.company.trim());
 
       if (activeTab === 'audit') {
-        const bookingPayload = {
+        const leadPayload = {
           name: sanitizedName,
           email: sanitizedEmail,
           phone: sanitizedPhone,
           company: sanitizedCompany,
-          requestedService: sanitizeInput(form.service),
+          industry: sanitizeInput(form.industry) || 'Other',
+          service: sanitizeInput(form.service) || 'Custom Systems',
+          requestedService: sanitizeInput(form.service) || 'Custom Systems',
           preferredDate: 'TBD',
-          status: 'Pending',
+          message: `System requested: ${form.service}.`,
+          leadSource: 'Book Audit',
+          source: 'Book Audit',
+          status: 'New',
           createdAt: serverTimestamp()
         };
 
         // STEP 2 Trace: console logs for Book Audit submission
         console.log("Submitting Book Audit Form");
-        console.log("Firestore Payload", bookingPayload);
-        const docRef = await addDoc(collection(db, 'bookings'), bookingPayload);
+        console.log("Firestore Payload", leadPayload);
+        const docRef = await addDoc(collection(db, 'leads'), leadPayload);
         console.log("Document Created", docRef.id);
+        const leadWithId = { id: docRef.id, ...leadPayload };
+
+        // Send Confirmation Email, WhatsApp, and Google Calendar Booking
+        try {
+          await emailService.sendAuditConfirmation(leadWithId);
+          await whatsappService.sendLeadCreated(leadWithId);
+          await calendarService.createEvent(leadWithId);
+        } catch (eErr) {
+          console.error('Real integrations triggers failed:', eErr);
+        }
 
         // Create notification
         try {
@@ -120,7 +138,7 @@ export default function LeadFormModal() {
         try {
           await addDoc(collection(db, 'activity_logs'), {
             action: 'Booking Created',
-            entity: 'booking',
+            entity: 'lead',
             entityId: docRef.id,
             performedBy: 'website',
             details: `New audit booking request from ${sanitizedName} (${sanitizedCompany}) for ${form.service}`,
@@ -131,12 +149,15 @@ export default function LeadFormModal() {
         }
 
       } else {
-        const contactPayload = {
+        const leadPayload = {
           name: sanitizedName,
           email: sanitizedEmail,
           phone: sanitizedPhone,
           company: sanitizedCompany,
+          industry: 'Other',
+          service: 'Custom Systems',
           message: sanitizeInput(form.message.trim()),
+          leadSource: 'Contact Form',
           source: 'Contact Form',
           status: 'New',
           createdAt: serverTimestamp()
@@ -144,9 +165,18 @@ export default function LeadFormModal() {
 
         // STEP 1 Trace: console logs for Contact Form submission
         console.log("Submitting Contact Form");
-        console.log("Firestore Payload", contactPayload);
-        const docRef = await addDoc(collection(db, 'contactForms'), contactPayload);
+        console.log("Firestore Payload", leadPayload);
+        const docRef = await addDoc(collection(db, 'leads'), leadPayload);
         console.log("Document Created", docRef.id);
+        const leadWithId = { id: docRef.id, ...leadPayload };
+
+        // Send Thank You Email and WhatsApp alert
+        try {
+          await emailService.sendThankYouEmail(leadWithId);
+          await whatsappService.sendLeadCreated(leadWithId);
+        } catch (eErr) {
+          console.error('Real integrations triggers failed:', eErr);
+        }
 
         // Create notification
         try {
@@ -165,7 +195,7 @@ export default function LeadFormModal() {
         try {
           await addDoc(collection(db, 'activity_logs'), {
             action: 'Contact Form Submitted',
-            entity: 'contact_form',
+            entity: 'lead',
             entityId: docRef.id,
             performedBy: 'website',
             details: `New contact form submission from ${form.name.trim()} (${form.company.trim()})`,

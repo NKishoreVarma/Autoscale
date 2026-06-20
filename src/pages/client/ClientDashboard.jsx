@@ -191,32 +191,8 @@ export default function ClientDashboard() {
       });
 
     } catch (err) {
-      console.warn("[ClientDashboard] Storage upload failed, falling back to database-simulate:", err.message);
-      
-      // Fallback: Write directly to Firestore with a simulated file URL
-      try {
-        const dummyURL = `https://firebasestorage.googleapis.com/v0/b/autoscale-prod-db6ea.appspot.com/o/mock%2F${encodeURIComponent(file.name)}?alt=media`;
-        await addDoc(collection(db, 'projectFiles'), {
-          projectId: selectedProject.id,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          downloadURL: dummyURL,
-          path: storagePath,
-          uploadedBy: user?.email || 'Client (Simulated)',
-          uploadedAt: serverTimestamp(),
-        });
-        
-        await addDoc(collection(db, 'projectTimelines'), {
-          projectId: selectedProject.id,
-          stage: selectedProject.status || 'Building',
-          description: `Client uploaded document (simulated): "${file.name}"`,
-          timestamp: serverTimestamp()
-        });
-      } catch (dbErr) {
-        console.error("[ClientDashboard] Fallback also failed:", dbErr);
-        setUploadError('File upload failed. Please try again.');
-      }
+      console.error("[ClientDashboard] Storage upload failed:", err);
+      setUploadError(`File upload failed: ${err.message || 'Check storage configurations and rules.'}`);
     } finally {
       setUploading(false);
     }

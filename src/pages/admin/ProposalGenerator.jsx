@@ -1,21 +1,36 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
+import { useLocation } from 'react-router-dom';
+import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { generateWithGemini } from '../../utils/gemini';
 import { FileText, X, Plus, Trash2, ArrowUpRight, Sparkles, Printer, DollarSign, Calendar, User, Briefcase, Download, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { logActivity } from '../../utils/activityLogger';
+import { emailService } from '../../utils/emailService';
+import { whatsappService } from '../../utils/whatsappService';
+import { pdfGenerator } from '../../utils/pdfGenerator';
 
 const formatINR = (val) => {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val || 0);
 };
 
+const STATUS_COLORS = {
+  Draft: 'border-gray-500/20 text-gray-400 bg-gray-950/10',
+  Sent: 'border-blue-500/20 text-blue-400 bg-blue-950/10',
+  Viewed: 'border-amber-500/20 text-amber-400 bg-amber-950/10',
+  Negotiation: 'border-purple-500/20 text-purple-400 bg-purple-950/10',
+  Accepted: 'border-emerald-500/20 text-emerald-400 bg-emerald-950/10',
+  Won: 'border-emerald-500/20 text-emerald-400 bg-emerald-950/10',
+  Rejected: 'border-rose-500/20 text-rose-400 bg-rose-950/10',
+};
+
 export default function ProposalGenerator() {
+  const location = useLocation();
   const { user: authUser, userRole } = useAuth();
   const [proposals, setProposals] = useState([]);
   const [leads, setLeads] = useState([]);
-  const [contactForms, setContactForms] = useState([]);
-  const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedProposal, setSelectedProposal] = useState(null);
   const [showModal, setShowModal] = useState(false);
@@ -29,14 +44,31 @@ export default function ProposalGenerator() {
     price: ''
   });
 
-  // Listen to contacts and bookings to build lead list
+  // Handle pre-filling if redirected from AI Audit details
   useEffect(() => {
-    const unsubContacts = onSnapshot(collection(db, 'contactForms'), (snap) => {
-      setContactForms(snap.docs.map(d => ({ id: d.id, ...d.data(), _source: 'Contact Form' })));
-    });
+    if (location.state && location.state.auditId) {
+      const targetLeadId = location.state.leadId || '';
+      setForm({
+        leadId: targetLeadId,
+        service: location.state.service || 'Custom Systems',
+        price: location.state.price || ''
+      });
 
-    const unsubBookings = onSnapshot(collection(db, 'bookings'), (snap) => {
-      setBookings(snap.docs.map(d => ({ id: d.id, ...d.data(), _source: 'Book Audit' })));
+      if (!targetLeadId && location.state.company && activeLeads.length > 0) {
+        const found = activeLeads.find(l => l.company.toLowerCase() === location.state.company.toLowerCase());
+        if (found) {
+          setForm(f => ({ ...f, leadId: found.id }));
+        }
+      }
+
+      setShowModal(true);
+    }
+  }, [location.state, activeLeads]);
+
+  // Listen to leads and proposals
+  useEffect(() => {
+    const unsubLeads = onSnapshot(collection(db, 'leads'), (snap) => {
+      setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
     const unsubProposals = onSnapshot(
@@ -48,23 +80,23 @@ export default function ProposalGenerator() {
     );
 
     return () => {
-      unsubContacts();
-      unsubBookings();
+      unsubLeads();
       unsubProposals();
     };
   }, []);
 
   // Consolidate leads
   const activeLeads = React.useMemo(() => {
-    const list = [];
-    contactForms.forEach(c => {
-      list.push({ id: c.id, name: c.name, company: c.company || 'Private', industry: c.industry || 'Other', challenges: c.message || '', email: c.email });
-    });
-    bookings.forEach(b => {
-      list.push({ id: b.id, name: b.name, company: b.company || 'Private', industry: b.industry || 'Other', challenges: b.message || '', email: b.email });
-    });
-    return list;
-  }, [contactForms, bookings]);
+    return leads.map(l => ({
+      id: l.id,
+      name: l.name || '',
+      company: l.company || 'Private',
+      industry: l.industry || 'Other',
+      challenges: l.message || '',
+      email: l.email || '',
+      service: l.service || 'Custom Systems'
+    }));
+  }, [leads]);
 
   const handleGenerateProposal = async (e) => {
     e.preventDefault();
@@ -118,6 +150,7 @@ export default function ProposalGenerator() {
         email: selectedLead.email || '',
         service: form.service,
         price: Number(form.price),
+        status: 'Draft',
         problem: jsonResult.problem || 'Incomplete system capture analysis.',
         solution: jsonResult.solution || 'Deploy custom automated workflows.',
         timeline: jsonResult.timeline || [],
@@ -131,6 +164,24 @@ export default function ProposalGenerator() {
       setGenProgress(100);
       clearInterval(progressInterval);
 
+      // Auto generate and upload Proposal PDF
+      try {
+        const pdfUrl = await pdfGenerator.generateAndUploadProposal(docRef.id, payload);
+        if (pdfUrl) {
+          await updateDoc(doc(db, 'proposals', docRef.id), { pdfUrl });
+          payload.pdfUrl = pdfUrl;
+        }
+      } catch (pdfErr) {
+        console.error('[ProposalGenerator] Proposal PDF generation failed:', pdfErr);
+      }
+
+      // Log activity
+      await logActivity(
+        'proposal_sent',
+        'Proposal Generated',
+        `Bespoke proposal generated for ${selectedLead.name} (${form.service}) valued at ${formatINR(form.price)}`
+      );
+
       // Create notification
       await addDoc(collection(db, 'notifications'), {
         type: 'project_created',
@@ -140,12 +191,8 @@ export default function ProposalGenerator() {
         createdAt: serverTimestamp()
       });
 
-      // Update lead status to Proposal Sent in back collection
-      const backingLead = contactForms.find(c => c.id === selectedLead.id) || bookings.find(b => b.id === selectedLead.id);
-      if (backingLead) {
-        const collName = backingLead._source === 'Contact Form' ? 'contactForms' : 'bookings';
-        await updateDoc(doc(db, collName, selectedLead.id), { status: 'Proposal Sent' });
-      }
+      // Update lead status to Proposal Sent in leads collection
+      await updateDoc(doc(db, 'leads', selectedLead.id), { status: 'Proposal Sent' });
 
       // Audit Log
       await logAuditAction(
@@ -165,15 +212,228 @@ export default function ProposalGenerator() {
 
     } catch (err) {
       console.error("Error generating proposal:", err);
-      alert("AI Proposal generation failed. Please try again.");
+      triggerToast('AI Proposal generation failed. Please try again.', 'error');
       setGenerating(false);
       clearInterval(progressInterval);
     }
   };
 
+  const handleStatusChange = async (proposalId, newStatus) => {
+    try {
+      await updateDoc(doc(db, 'proposals', proposalId), {
+        status: newStatus,
+        updatedAt: serverTimestamp()
+      });
+
+      // Update selectedProposal locally if it's the active one
+      if (selectedProposal && selectedProposal.id === proposalId) {
+        setSelectedProposal(prev => ({ ...prev, status: newStatus }));
+      }
+
+      await logAuditAction(
+        authUser?.email || 'admin@autoscale.systems',
+        userRole || 'admin',
+        'Updated Proposal Status',
+        'proposals',
+        proposalId,
+        `Updated status of proposal for "${selectedProposal?.leadName || proposalId}" to "${newStatus}"`
+      );
+
+      // If Sent, trigger proposal notifications to lead
+      if (newStatus === 'Sent' && selectedProposal) {
+        const leadId = selectedProposal.leadId;
+        const targetLead = leads.find(l => l.id === leadId);
+        const email = selectedProposal.email || (targetLead && targetLead.email) || '';
+        const phone = (targetLead && targetLead.phone) || '';
+        const leadObj = {
+          name: selectedProposal.leadName,
+          company: selectedProposal.company,
+          email: email,
+          phone: phone
+        };
+        try {
+          await emailService.sendProposalEmail(selectedProposal, leadObj);
+          if (phone) {
+            await whatsappService.sendProposalSent(selectedProposal, phone);
+          }
+        } catch (sentErr) {
+          console.error('[ProposalGenerator] Error sending proposal notifications:', sentErr);
+        }
+      }
+
+      // If Accepted or Won, automatically convert the lead to a client and create project/tasks/invoice
+      if (newStatus === 'Accepted' || newStatus === 'Won') {
+        const leadId = selectedProposal.leadId;
+        const targetLead = leads.find(l => l.id === leadId);
+
+        const companyName = selectedProposal.company || (targetLead && targetLead.company) || 'Private Client';
+        const ownerName = selectedProposal.leadName || (targetLead && targetLead.name) || 'Anonymous';
+        const email = selectedProposal.email || (targetLead && targetLead.email) || '';
+        const phone = (targetLead && targetLead.phone) || '';
+        const industry = (targetLead && targetLead.industry) || 'Other';
+        const service = selectedProposal.service || (targetLead && targetLead.service) || 'Custom System';
+        const contractValue = Number(selectedProposal.price) || (targetLead && Number(targetLead.contractValue)) || 0;
+
+        // 1. Add Client document
+        const clientDoc = await addDoc(collection(db, 'clients'), {
+          leadId: leadId || '',
+          company: companyName,
+          companyName: companyName,
+          contactPerson: ownerName,
+          ownerName: ownerName,
+          email: email,
+          phone: phone,
+          industry: industry,
+          website: '',
+          contractValue: contractValue,
+          status: 'Active',
+          createdAt: serverTimestamp(),
+          createdBy: authUser?.email || 'admin'
+        });
+
+        await logActivity(
+          'client_won',
+          'Client Won',
+          `${ownerName} from ${companyName} accepted proposal and converted to active client`
+        );
+
+        const projectName = `${companyName} Automation Platform`;
+
+        // 2. Add Project document
+        const projectDoc = await addDoc(collection(db, 'projects'), {
+          projectName,
+          clientId: clientDoc.id,
+          clientName: companyName,
+          type: service,
+          projectType: service,
+          description: (targetLead && targetLead.message) || 'System requested via accepted proposal.',
+          priority: 'Medium',
+          status: 'Planning',
+          progress: 0,
+          budget: contractValue,
+          projectValue: contractValue,
+          deadline: '',
+          assignedTeam: '',
+          createdAt: serverTimestamp()
+        });
+
+        await logActivity(
+          'project_created',
+          'Project Created',
+          `Project "${projectName}" workspace initiated for client "${companyName}"`
+        );
+
+        // 3. Create three default starter Tasks
+        const defaultTasks = [
+          "Client Onboarding & Project Kickoff",
+          "System Requirements & Specifications Review",
+          "Architecture Design & Blueprint Signoff"
+        ];
+        
+        const deadlineDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        for (const title of defaultTasks) {
+          await addDoc(collection(db, 'tasks'), {
+            title,
+            description: `Automatic onboarding checklist item: ${title}`,
+            assignedTo: '',
+            assignee: '',
+            project: projectName,
+            projectId: projectDoc.id,
+            deadline: deadlineDate,
+            dueDate: deadlineDate,
+            priority: 'Medium',
+            status: 'Todo',
+            createdAt: serverTimestamp(),
+            createdBy: authUser?.email || 'admin'
+          });
+        }
+
+        // 4. Create a draft invoice
+        const invoiceNum = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+        await addDoc(collection(db, 'invoices'), {
+          invoiceNumber: invoiceNum,
+          clientId: clientDoc.id,
+          clientName: companyName,
+          projectId: projectDoc.id,
+          projectTitle: projectName,
+          amount: contractValue,
+          status: 'Draft',
+          dueDate: deadlineDate,
+          issueDate: new Date().toISOString().split('T')[0],
+          createdAt: serverTimestamp()
+        });
+
+        // 5. Update Lead status to Won in backing collection
+        if (leadId) {
+          await updateDoc(doc(db, 'leads', leadId), {
+            status: 'Won',
+            updatedAt: serverTimestamp()
+          });
+        }
+
+        // 6. Create real-time notification
+        await addDoc(collection(db, 'notifications'), {
+          type: 'lead_converted',
+          title: 'Lead Converted to Client (Proposal Accepted)',
+          message: `${ownerName} from ${companyName} has accepted their proposal and is now an active client.`,
+          read: false,
+          createdAt: serverTimestamp()
+        });
+
+        // 7. Write timeline log
+        await addDoc(collection(db, 'projectTimelines'), {
+          projectId: projectDoc.id,
+          stage: 'Planning',
+          description: `Project workspace initiated for ${companyName} via accepted proposal.`,
+          timestamp: serverTimestamp()
+        });
+
+        // 8. Trigger real onboarding email & WhatsApp alerts
+        const clientObj = {
+          id: clientDoc.id,
+          email: email,
+          contactPerson: ownerName,
+          ownerName: ownerName,
+          company: companyName,
+          companyName: companyName,
+          phone: phone
+        };
+        const projectObj = {
+          id: projectDoc.id,
+          projectName
+        };
+
+        try {
+          await emailService.sendOnboardingEmail(clientObj, projectObj);
+          await whatsappService.sendClientOnboarding(clientObj, projectObj);
+          // Auto-generate and upload Client Summary PDF
+          const summaryUrl = await pdfGenerator.generateAndUploadSummary(clientDoc.id, clientObj, projectObj);
+          if (summaryUrl) {
+            await updateDoc(doc(db, 'clients', clientDoc.id), { summaryUrl });
+          }
+        } catch (onbErr) {
+          console.error('[ProposalGenerator] Onboarding notifications failed:', onbErr);
+        }
+
+        await logAuditAction(
+          authUser?.email || 'admin@autoscale.systems',
+          userRole || 'admin',
+          'Proposal Auto-Onboarded',
+          'clients',
+          clientDoc.id,
+          `Proposal Accepted: Auto-created client "${ownerName}" (${companyName}) and initiated project workspace`
+        );
+
+        triggerToast('Proposal Accepted! Client onboarding workflow triggered and project workspace initiated.', 'success');
+      }
+    } catch (err) {
+      console.error('Error changing proposal status:', err);
+    }
+  };
+
   const handleDeleteProposal = async (id, name) => {
     if (userRole !== 'super_admin') {
-      alert("Access Denied: Only Super Admin can delete proposal documents.");
+      triggerToast('Access Denied: Only Super Admin can delete proposal documents.', 'error');
       return;
     }
     if (!window.confirm(`Are you sure you want to delete proposal for ${name}?`)) return;
@@ -277,10 +537,15 @@ export default function ProposalGenerator() {
                     </span>
                   </div>
                   <div className="flex justify-between items-center mt-2">
-                    <span className="text-[10px] text-gray-400 font-light truncate max-w-[140px]">{prop.service}</span>
-                    <span className="text-[10px] font-semibold text-white font-mono">
-                      {formatINR(prop.price)}
-                    </span>
+                    <span className="text-[10px] text-gray-400 font-light truncate max-w-[120px]">{prop.service}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[8px] font-bold tracking-widest px-1.5 py-0.5 rounded border uppercase ${STATUS_COLORS[prop.status || 'Draft']}`}>
+                        {prop.status || 'Draft'}
+                      </span>
+                      <span className="text-[10px] font-semibold text-white font-mono">
+                        {formatINR(prop.price)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))
@@ -296,11 +561,29 @@ export default function ProposalGenerator() {
               <div className="p-6 md:p-8 rounded-xl border border-white/5 bg-white/[0.01] space-y-8 relative overflow-hidden">
                 <div className="flex justify-between items-start border-b border-white/5 pb-6">
                   <div>
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-mono">PROPOSAL VALUE: {formatINR(selectedProposal.price)}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-mono">PROPOSAL VALUE: {formatINR(selectedProposal.price)}</span>
+                      <span className={`text-[9px] font-bold tracking-widest px-2 py-0.5 rounded border uppercase ${STATUS_COLORS[selectedProposal.status || 'Draft']}`}>
+                        {selectedProposal.status || 'Draft'}
+                      </span>
+                    </div>
                     <h2 className="text-2xl font-light text-white uppercase mt-1.5">{selectedProposal.leadName} &mdash; {selectedProposal.service}</h2>
                     <span className="text-xs text-gray-400 font-light mt-1 block">Company: {selectedProposal.company} &bull; Email: {selectedProposal.email}</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    <select
+                      value={selectedProposal.status || 'Draft'}
+                      onChange={(e) => handleStatusChange(selectedProposal.id, e.target.value)}
+                      className="bg-black border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-white transition"
+                    >
+                      <option value="Draft">Draft</option>
+                      <option value="Sent">Sent</option>
+                      <option value="Viewed">Viewed</option>
+                      <option value="Negotiation">Negotiation</option>
+                      <option value="Accepted">Accepted</option>
+                      <option value="Won">Won</option>
+                      <option value="Rejected">Rejected</option>
+                    </select>
                     <button
                       onClick={handlePrint}
                       className="p-2 border border-white/10 text-gray-400 hover:bg-white/5 hover:text-white rounded-lg transition flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"

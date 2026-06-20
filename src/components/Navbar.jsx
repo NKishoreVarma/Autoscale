@@ -1,20 +1,27 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const scrollToSection = (id) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
+    if (location.pathname !== '/') {
+      navigate('/');
+      setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    } else {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  const handleOpenModal = () => {
-    window.dispatchEvent(new CustomEvent('open-lead-modal', {
-      detail: { service: '', message: '' }
-    }));
+  const handleBookAuditClick = () => {
+    navigate('/free-audit');
   };
 
   return (
@@ -34,7 +41,13 @@ export default function Navbar() {
           {/* Left: Brand Name */}
           <div 
             className="cursor-pointer cursor-target"
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            onClick={() => {
+              if (location.pathname !== '/') {
+                navigate('/');
+              } else {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }
+            }}
           >
             <span className="text-xl md:text-2xl font-semibold tracking-tight text-white uppercase">AUTOSCALE</span>
           </div>
@@ -60,6 +73,18 @@ export default function Navbar() {
               Case Studies
             </button>
             <button 
+              onClick={() => navigate('/resources')} 
+              className={`cursor-target hover:text-white transition duration-200 ${location.pathname === '/resources' ? 'text-white font-semibold' : ''}`}
+            >
+              Resources
+            </button>
+            <button 
+              onClick={() => navigate('/blog')} 
+              className={`cursor-target hover:text-white transition duration-200 ${location.pathname === '/blog' ? 'text-white font-semibold' : ''}`}
+            >
+              Blog
+            </button>
+            <button 
               onClick={() => scrollToSection('cta')} 
               className="cursor-target hover:text-white transition duration-200"
             >
@@ -70,10 +95,10 @@ export default function Navbar() {
           {/* Right: CTA Button */}
           <div className="flex items-center gap-4">
             <button
-              onClick={handleOpenModal}
+              onClick={handleBookAuditClick}
               className="hidden sm:inline-block bg-white text-black px-6 py-2 rounded-lg text-sm font-medium hover:bg-[#5E0ED7] hover:text-white transition duration-200 active:scale-[0.98] cursor-target"
             >
-              Book Audit
+              Free Audit
             </button>
 
             {/* Mobile Menu Burger system */}
@@ -119,6 +144,18 @@ export default function Navbar() {
                 Case Studies
               </button>
               <button 
+                onClick={() => { setIsMobileMenuOpen(false); navigate('/resources'); }}
+                className="text-2xl font-bold tracking-widest uppercase text-white hover:text-[#5E0ED7] transition text-left"
+              >
+                Resources
+              </button>
+              <button 
+                onClick={() => { setIsMobileMenuOpen(false); navigate('/blog'); }}
+                className="text-2xl font-bold tracking-widest uppercase text-white hover:text-[#5E0ED7] transition text-left"
+              >
+                Blog
+              </button>
+              <button 
                 onClick={() => { setIsMobileMenuOpen(false); scrollToSection('cta'); }}
                 className="text-2xl font-bold tracking-widest uppercase text-white hover:text-[#5E0ED7] transition text-left"
               >
@@ -126,7 +163,7 @@ export default function Navbar() {
               </button>
               
               <button 
-                onClick={() => { setIsMobileMenuOpen(false); handleOpenModal(); }}
+                onClick={() => { setIsMobileMenuOpen(false); handleBookAuditClick(); }}
                 className="w-full text-center py-4 bg-[#5E0ED7] text-white font-bold uppercase text-sm mt-8 rounded-xl"
               >
                 Book Free Audit

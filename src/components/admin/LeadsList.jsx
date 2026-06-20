@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, updateDoc, addDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
+import { emailService } from '../../utils/emailService';
+import { whatsappService } from '../../utils/whatsappService';
+import { pdfGenerator } from '../../utils/pdfGenerator';
 import { Search, Calendar, MessageSquare, X, Plus, Trash, Check, User, Building, Phone, Mail, FileText, Edit2, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { logActivity } from '../../utils/activityLogger';
 import { sanitizeInput } from '../../utils/sanitizer';
+import { triggerToast } from '../../utils/errorHandler';
 
 const STATUSES = ['New', 'Qualified', 'Proposal Sent', 'Won', 'Lost', 'Pending', 'Scheduled', 'Completed', 'Cancelled'];
 const STATUS_COLORS = {
@@ -78,6 +83,7 @@ export default function LeadsList() {
   const { user: authUser, userRole, userProfile } = useAuth();
   const [contactForms, setContactForms] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [leads, setLeads] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -115,23 +121,25 @@ export default function LeadsList() {
 
   // Listeners
   useEffect(() => {
-    console.log('[LeadsList] Listening to contactForms and bookings collections...');
+    console.log('[LeadsList] Listening to leads collection...');
     
-    // Check and seed default data if both are empty
-    const checkAndSeed = async (snap1, snap2) => {
-      if (snap1.empty && snap2.empty) {
-        console.log('[LeadsList] Both collections are empty. Seeding default CRM data...');
+    // Check and seed default data if empty
+    const checkAndSeed = async (snap) => {
+      if (snap.empty) {
+        console.log('[LeadsList] leads collection is empty. Seeding default CRM data...');
         
-        const defaultContacts = [
+        const defaultLeads = [
           {
             name: "Amit Patel",
             email: "amit@patelclinics.com",
             phone: "+919988776655",
             company: "Patel Care Clinics",
             industry: "Healthcare",
+            service: "AI Agents",
             message: "Automate appointment inquiries and general clinic FAQs.",
             status: "Proposal Sent",
-            createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)
+            leadSource: "Contact Form",
+            source: "Contact Form"
           },
           {
             name: "Rahul Sharma",
@@ -139,137 +147,68 @@ export default function LeadsList() {
             phone: "+919876543210",
             company: "TechBuilders India",
             industry: "Agencies",
+            service: "Custom Systems",
             message: "Need cognitive AI agents to automate code review and deployment updates.",
             status: "New",
-            createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2)
-          }
-        ];
-
-        const defaultBookings = [
+            leadSource: "Contact Form",
+            source: "Contact Form"
+          },
           {
             name: "Priya Nair",
             email: "priya@greenrealestate.co",
             phone: "+919123456789",
             company: "Green Space Realty",
             industry: "Real Estate",
-            serviceRequested: "WhatsApp Automation",
+            service: "WhatsApp Automation",
+            requestedService: "WhatsApp Automation",
             preferredDate: "2026-06-18",
+            message: "WhatsApp Lead CRM Pipeline",
             status: "Pending",
-            createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3)
+            leadSource: "Book Audit",
+            source: "Book Audit"
           }
         ];
 
-        for (const c of defaultContacts) {
+        for (const l of defaultLeads) {
           try {
-            await addDoc(collection(db, 'contactForms'), c);
+            await addDoc(collection(db, 'leads'), {
+              ...l,
+              createdAt: serverTimestamp()
+            });
           } catch (err) {
-            console.error('Error seeding default contact:', err);
-          }
-        }
-
-        for (const b of defaultBookings) {
-          try {
-            await addDoc(collection(db, 'bookings'), b);
-          } catch (err) {
-            console.error('Error seeding default booking:', err);
+            console.error('Error seeding default lead:', err);
           }
         }
       }
     };
 
-    let contactFormsSnap = null;
-    let bookingsSnap = null;
-    let initialCheckDone = false;
-
-    const runSeedingCheck = () => {
-      if (contactFormsSnap && bookingsSnap && !initialCheckDone) {
-        initialCheckDone = true;
-        checkAndSeed(contactFormsSnap, bookingsSnap);
-      }
-    };
-
-    const unsubscribeContactForms = onSnapshot(
-      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc'), limit(200)),
+    const unsubscribeLeads = onSnapshot(
+      query(collection(db, 'leads'), orderBy('createdAt', 'desc'), limit(200)),
       (snapshot) => {
-        contactFormsSnap = snapshot;
-        const list = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, _collection: 'contactForms', ...docSnap.data() });
-        });
-        setContactForms(list);
-        setLoading(false);
-        runSeedingCheck();
+        if (snapshot.empty) {
+          checkAndSeed(snapshot);
+        } else {
+          const list = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() });
+          });
+          setContactForms([]); // keep empty to prevent unexpected triggers
+          setBookings([]);
+          // We'll set leads directly
+          setLeads(list);
+          setLoading(false);
+        }
       },
       (err) => {
-        console.error('Error listening to contactForms:', err);
-        setLoading(false);
-      }
-    );
-
-    const unsubscribeBookings = onSnapshot(
-      query(collection(db, 'bookings'), orderBy('createdAt', 'desc'), limit(200)),
-      (snapshot) => {
-        bookingsSnap = snapshot;
-        const list = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, _collection: 'bookings', ...docSnap.data() });
-        });
-        setBookings(list);
-        setLoading(false);
-        runSeedingCheck();
-      },
-      (err) => {
-        console.error('Error listening to bookings:', err);
+        console.error('Error listening to leads:', err);
         setLoading(false);
       }
     );
 
     return () => {
-      unsubscribeContactForms();
-      unsubscribeBookings();
+      unsubscribeLeads();
     };
   }, []);
-
-  // Merge into leads state
-  const leads = React.useMemo(() => {
-    const list = [];
-    
-    contactForms.forEach((item) => {
-      list.push({
-        id: item.id,
-        name: item.name || '',
-        email: item.email || '',
-        phone: item.phone || '',
-        company: item.company || '',
-        industry: item.industry || 'Other',
-        service: item.service || 'Custom Systems',
-        message: item.message || '',
-        leadSource: 'Contact Form',
-        status: item.status || 'New',
-        createdAt: item.createdAt,
-        _collection: 'contactForms'
-      });
-    });
-
-    bookings.forEach((item) => {
-      list.push({
-        id: item.id,
-        name: item.name || '',
-        email: item.email || '',
-        phone: item.phone || '',
-        company: item.company || '',
-        industry: item.industry || 'Other',
-        service: item.serviceRequested || item.service || 'Custom Systems',
-        message: item.message || `System: ${item.serviceRequested || 'Custom Systems'}. Preferred Date: ${item.preferredDate || 'TBD'}`,
-        leadSource: 'Book Audit',
-        status: item.status || 'Pending',
-        createdAt: item.createdAt,
-        _collection: 'bookings'
-      });
-    });
-
-    return list;
-  }, [contactForms, bookings]);
 
   // Fetch notes & meetings when a lead is selected
   useEffect(() => {
@@ -313,17 +252,25 @@ export default function LeadsList() {
       const target = leads.find(l => l.id === leadId);
       if (!target) return;
 
-      const collectionName = target._collection;
-      await updateDoc(doc(db, collectionName, leadId), { 
+      await updateDoc(doc(db, 'leads', leadId), { 
         status: newStatus,
         updatedAt: serverTimestamp()
       });
+
+      // Trigger Alert when qualified
+      if (newStatus === 'Qualified') {
+        try {
+          await emailService.sendLeadQualifiedAlert(target);
+        } catch (eErr) {
+          console.error('Email alert trigger failed:', eErr);
+        }
+      }
       
       await logAuditAction(
         userProfile?.email || authUser?.email || 'admin@autoscale.systems',
         userRole || 'admin',
         `Changed Lead Status`,
-        collectionName,
+        'leads',
         leadId,
         `Updated status of lead "${target?.name || leadId}" to "${newStatus}"`
       );
@@ -339,7 +286,7 @@ export default function LeadsList() {
   // Delete lead (Super Admin only)
   const handleDeleteLead = async (leadId) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can delete records.');
+      triggerToast('Access Denied: Only Super Admin can delete records.', 'error');
       return;
     }
 
@@ -349,14 +296,13 @@ export default function LeadsList() {
       const target = leads.find(l => l.id === leadId);
       if (!target) return;
 
-      const collectionName = target._collection;
-      await deleteDoc(doc(db, collectionName, leadId));
+      await deleteDoc(doc(db, 'leads', leadId));
       
       await logAuditAction(
         userProfile?.email || authUser?.email || 'super_admin@autoscale.systems',
         userRole || 'super_admin',
         `Deleted Lead`,
-        collectionName,
+        'leads',
         leadId,
         `Deleted lead record for "${target?.name || leadId}"`
       );
@@ -388,30 +334,26 @@ export default function LeadsList() {
     e.preventDefault();
     setSaving(true);
     try {
-      const collectionName = selectedLead._collection;
       const updates = {
         name: editFormData.name.trim(),
         email: editFormData.email.trim(),
         phone: editFormData.phone.trim(),
         company: editFormData.company.trim(),
         industry: editFormData.industry,
+        service: editFormData.service,
+        requestedService: editFormData.service,
+        message: editFormData.message.trim(),
         status: editFormData.status,
         updatedAt: serverTimestamp()
       };
 
-      if (collectionName === 'bookings') {
-        updates.serviceRequested = editFormData.service;
-      } else {
-        updates.message = editFormData.message.trim();
-      }
-
-      await updateDoc(doc(db, collectionName, selectedLead.id), updates);
+      await updateDoc(doc(db, 'leads', selectedLead.id), updates);
 
       await logAuditAction(
         userProfile?.email || authUser?.email || 'admin@autoscale.systems',
         userRole || 'admin',
         `Updated Lead`,
-        collectionName,
+        'leads',
         selectedLead.id,
         `Updated details of lead "${selectedLead.name}"`
       );
@@ -465,9 +407,18 @@ export default function LeadsList() {
         createdBy: authUser?.email || 'admin'
       });
 
+      await logActivity(
+        'client_won',
+        'Client Won',
+        `${convertFormData.ownerName} from ${convertFormData.companyName} converted to active client`
+      );
+
+      const projectName = `${convertFormData.companyName.trim()} Automation Platform`;
+      const projectValue = Number(convertFormData.contractValue) || 0;
+
       // 2. Add Project document automatically
-      await addDoc(collection(db, 'projects'), {
-        projectName: `${convertFormData.companyName} Automation Platform`,
+      const projectDoc = await addDoc(collection(db, 'projects'), {
+        projectName,
         clientId: clientDoc.id,
         clientName: convertFormData.companyName.trim(), // UI backward compat
         type: selectedLead.service || 'Custom System', // UI backward compat
@@ -476,17 +427,63 @@ export default function LeadsList() {
         priority: 'Medium',
         status: 'Planning',
         progress: 0,
-        budget: Number(convertFormData.contractValue) || 0, // UI backward compat
-        projectValue: Number(convertFormData.contractValue) || 0,
+        budget: projectValue, // UI backward compat
+        projectValue,
         deadline: '',
         assignedTeam: '',
         createdAt: serverTimestamp()
       });
 
-      // 3. Update Lead status to Won in backing collection
+      await logActivity(
+        'project_created',
+        'Project Created',
+        `Project "${projectName}" workspace initiated for client "${convertFormData.companyName}"`
+      );
+
+      // 3. Create three default starter Tasks linked to this project
+      const defaultTasks = [
+        "Client Onboarding & Project Kickoff",
+        "System Requirements & Specifications Review",
+        "Architecture Design & Blueprint Signoff"
+      ];
+      
+      const deadlineDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      for (const title of defaultTasks) {
+        await addDoc(collection(db, 'tasks'), {
+          title,
+          description: `Automatic onboarding checklist item: ${title}`,
+          assignedTo: '',
+          assignee: '',
+          project: projectName,
+          projectId: projectDoc.id,
+          deadline: deadlineDate,
+          dueDate: deadlineDate,
+          priority: 'Medium',
+          status: 'Todo',
+          createdAt: serverTimestamp(),
+          createdBy: authUser?.email || 'admin'
+        });
+      }
+
+      // 4. Create a draft invoice
+      const invoiceNum = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+      await addDoc(collection(db, 'invoices'), {
+        invoiceNumber: invoiceNum,
+        clientId: clientDoc.id,
+        clientName: convertFormData.companyName.trim(),
+        projectId: projectDoc.id,
+        projectTitle: projectName,
+        amount: projectValue,
+        status: 'Draft',
+        dueDate: deadlineDate,
+        issueDate: new Date().toISOString().split('T')[0],
+        createdAt: serverTimestamp()
+      });
+
+      // 5. Update Lead status to Won in backing collection
       await handleStatusChange(selectedLead.id, 'Won');
 
-      // 4. Create real-time notification
+      // 6. Create real-time notification
       await addDoc(collection(db, 'notifications'), {
         type: 'lead_converted',
         title: 'Lead Converted to Client',
@@ -494,6 +491,41 @@ export default function LeadsList() {
         read: false,
         createdAt: serverTimestamp()
       });
+
+      // 7. Write timeline log
+      await addDoc(collection(db, 'projectTimelines'), {
+        projectId: projectDoc.id,
+        stage: 'Planning',
+        description: `Project workspace initiated for ${convertFormData.companyName}`,
+        timestamp: serverTimestamp()
+      });
+
+      // 8. Trigger real onboarding email & WhatsApp alerts
+      const clientObj = {
+        id: clientDoc.id,
+        email: convertFormData.email.trim(),
+        contactPerson: convertFormData.ownerName.trim(),
+        ownerName: convertFormData.ownerName.trim(),
+        company: convertFormData.companyName.trim(),
+        companyName: convertFormData.companyName.trim(),
+        phone: convertFormData.phone.trim()
+      };
+      const projectObj = {
+        id: projectDoc.id,
+        projectName
+      };
+
+      try {
+        await emailService.sendOnboardingEmail(clientObj, projectObj);
+        await whatsappService.sendClientOnboarding(clientObj, projectObj);
+        // Auto-generate and upload Client Summary PDF
+        const summaryUrl = await pdfGenerator.generateAndUploadSummary(clientDoc.id, clientObj, projectObj);
+        if (summaryUrl) {
+          await updateDoc(doc(db, 'clients', clientDoc.id), { summaryUrl });
+        }
+      } catch (onbErr) {
+        console.error('[LeadsList] Onboarding notifications failed:', onbErr);
+      }
 
       await logAuditAction(
         userProfile?.email || authUser?.email || 'admin@autoscale.systems',
@@ -506,7 +538,7 @@ export default function LeadsList() {
 
       setShowConvertModal(false);
       setSelectedLead(prev => ({ ...prev, status: 'Won' }));
-      alert('Lead successfully converted to Client and Project initiated!');
+      triggerToast('Lead successfully converted to Client and Project initiated!', 'success');
     } catch (err) {
       console.error('Error converting lead to client:', err);
     } finally {

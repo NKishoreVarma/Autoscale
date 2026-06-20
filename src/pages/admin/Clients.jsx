@@ -1,11 +1,13 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { logActivity } from '../../utils/activityLogger';
 import { sanitizeInput } from '../../utils/sanitizer';
 import {
-  Search, X, Plus, Building, User, Mail, Phone, Globe, IndianRupee,
+Search, X, Plus, Building, User, Mail, Phone, Globe, IndianRupee,
   FileText, MessageSquare, CreditCard, FolderKanban, Trash2, Edit3, ChevronDown
 } from 'lucide-react';
 
@@ -199,7 +201,7 @@ export default function Clients() {
   // Delete client
   const handleDeleteClient = async (clientId) => {
     if (userRole !== 'super_admin') {
-      alert('Access Denied: Only Super Admin can delete records.');
+      triggerToast('Access Denied: Only Super Admin can delete records.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this client?')) return;
@@ -244,6 +246,52 @@ export default function Clients() {
         createdAt: serverTimestamp()
       });
 
+      await logActivity(
+        'project_created',
+        'Project Created',
+        `Project "${projectForm.projectName.trim()}" created manually for client "${selectedClient.companyName || selectedClient.company}"`
+      );
+
+      // 1. Create three default starter Tasks linked to this project
+      const defaultTasks = [
+        "Client Onboarding & Project Kickoff",
+        "System Requirements & Specifications Review",
+        "Architecture Design & Blueprint Signoff"
+      ];
+      
+      const deadlineDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      for (const title of defaultTasks) {
+        await addDoc(collection(db, 'tasks'), {
+          title,
+          description: `Automatic onboarding checklist item: ${title}`,
+          assignedTo: '',
+          assignee: '',
+          project: projectForm.projectName.trim(),
+          projectId: projDoc.id,
+          deadline: deadlineDate,
+          dueDate: deadlineDate,
+          priority: 'Medium',
+          status: 'Todo',
+          createdAt: serverTimestamp(),
+          createdBy: authUser?.email || 'admin'
+        });
+      }
+
+      // 2. Create a draft invoice
+      const invoiceNum = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+      await addDoc(collection(db, 'invoices'), {
+        invoiceNumber: invoiceNum,
+        clientId: selectedClient.id,
+        clientName: selectedClient.companyName || selectedClient.company || '',
+        projectId: projDoc.id,
+        projectTitle: projectForm.projectName.trim(),
+        amount: Number(projectForm.projectValue) || 0,
+        status: 'Draft',
+        dueDate: deadlineDate,
+        issueDate: new Date().toISOString().split('T')[0],
+        createdAt: serverTimestamp()
+      });
+
       // Notification
       await addDoc(collection(db, 'notifications'), {
         type: 'project_created',
@@ -265,7 +313,7 @@ export default function Clients() {
 
       setProjectForm({ projectName: '', projectType: 'AI Agents', projectValue: '' });
       setShowProjectModal(false);
-      alert('Project successfully created!');
+      triggerToast('Project successfully created!', 'success');
     } catch (err) {
       console.error('Error creating project:', err);
     } finally {

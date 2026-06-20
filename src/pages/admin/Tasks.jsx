@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
+import { logActivity } from '../../utils/activityLogger';
 import { Plus, X, ArrowLeft, ArrowRight, Calendar, User, Briefcase, Flag, Clock, GripVertical, Trash2 } from 'lucide-react';
 
 const COLUMNS = [
@@ -67,7 +68,7 @@ export default function Tasks() {
     );
 
     const unsubTeam = onSnapshot(
-      query(collection(db, 'teamMembers'), orderBy('name', 'asc')),
+      query(collection(db, 'team'), orderBy('name', 'asc')),
       (snapshot) => {
         setTeamMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }
@@ -88,7 +89,16 @@ export default function Tasks() {
     if (newIndex >= 0 && newIndex < COLUMNS.length) {
       const newStatus = COLUMNS[newIndex].id;
       try {
+        const target = tasks.find(t => t.id === taskId);
         await updateDoc(doc(db, 'tasks', taskId), { status: newStatus });
+
+        if (newStatus === 'Completed') {
+          await logActivity(
+            'task_completed',
+            'Task Completed',
+            `Task "${target?.title || 'Untitled'}" was marked as Completed for project "${target?.project || 'General'}"`
+          );
+        }
       } catch (err) {
         console.error('Error moving task:', err);
       }
@@ -442,6 +452,14 @@ export default function Tasks() {
                     try {
                       await updateDoc(doc(db, 'tasks', selectedTask.id), { status: newStatus });
                       setSelectedTask((prev) => ({ ...prev, status: newStatus }));
+
+                      if (newStatus === 'Completed') {
+                        await logActivity(
+                          'task_completed',
+                          'Task Completed',
+                          `Task "${selectedTask.title || 'Untitled'}" was marked as Completed for project "${selectedTask.project || 'General'}"`
+                        );
+                      }
                     } catch (err) {
                       console.error('Error updating task status:', err);
                     }

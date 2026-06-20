@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { TableSkeleton } from '../../ui/Skeletons';
+import EmptyState from '../../ui/EmptyState';
 
 export default function DataTable({
   columns = [],
@@ -7,7 +9,10 @@ export default function DataTable({
   onRowClick,
   searchable = false,
   searchPlaceholder = 'Search...',
-  emptyMessage = 'No data found.',
+  emptyMessage = 'No data found in this category.',
+  emptyIcon,
+  emptyActionLabel = '',
+  emptyActionClick = null,
   loading = false,
   actions = [],
   filters = []
@@ -179,12 +184,18 @@ export default function DataTable({
 
       {/* Table Content */}
       {loading ? (
-        <div className="py-20 flex justify-center items-center">
-          <div className="w-6 h-6 border-t border-r border-white rounded-full animate-spin" />
+        <div className="p-4">
+          <TableSkeleton rows={5} cols={columns.length || 4} />
         </div>
       ) : processedData.length === 0 ? (
-        <div className="py-20 text-center text-sm text-gray-500 uppercase tracking-wider">
-          {emptyMessage}
+        <div className="py-12 flex justify-center">
+          <EmptyState
+            title="No records found"
+            description={emptyMessage}
+            icon={emptyIcon}
+            actionLabel={emptyActionLabel}
+            onActionClick={emptyActionClick}
+          />
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -238,3 +249,4 @@ export default function DataTable({
     </div>
   );
 }
+

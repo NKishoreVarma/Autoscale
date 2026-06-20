@@ -1,10 +1,15 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { logActivity } from '../../utils/activityLogger';
+import { emailService } from '../../utils/emailService';
+import { whatsappService } from '../../utils/whatsappService';
+import { pdfGenerator } from '../../utils/pdfGenerator';
 import {
-  Search, X, Plus, FileText, IndianRupee, AlertTriangle, CheckSquare,
+Search, X, Plus, FileText, IndianRupee, AlertTriangle, CheckSquare,
   Trash2, Calendar, User, Briefcase, TrendingUp, HelpCircle
 } from 'lucide-react';
 
@@ -158,6 +163,23 @@ export default function Invoices() {
         createdAt: serverTimestamp(),
       });
 
+      // Auto generate and upload Invoice PDF
+      try {
+        const pdfUrl = await pdfGenerator.generateAndUploadInvoice(invDoc.id, {
+          invoiceNumber: formData.invoiceNumber.trim().toUpperCase(),
+          clientName: client ? (client.companyName || client.company) : '',
+          projectTitle: project ? project.projectName : 'General Retainer',
+          amount: Number(formData.amount),
+          issueDate: new Date().toISOString().split('T')[0],
+          dueDate: formData.dueDate
+        });
+        if (pdfUrl) {
+          await updateDoc(doc(db, 'invoices', invDoc.id), { pdfUrl });
+        }
+      } catch (pdfErr) {
+        console.error('[Invoices] Invoice PDF generation failed:', pdfErr);
+      }
+
       // Timeline log if project selected
       if (formData.projectId) {
         await addDoc(collection(db, 'projectTimelines'), {
@@ -166,6 +188,22 @@ export default function Invoices() {
           description: `Invoice ${formData.invoiceNumber.trim().toUpperCase()} generated for ${formatINR(formData.amount)}`,
           timestamp: serverTimestamp()
         });
+      }
+
+      // Trigger email & WhatsApp if Sent
+      if (formData.status === 'Sent' && client) {
+        const invoiceObj = {
+          invoiceNumber: formData.invoiceNumber.trim().toUpperCase(),
+          amount: Number(formData.amount),
+          dueDate: formData.dueDate,
+          projectTitle: project ? project.projectName : 'General Retainer'
+        };
+        try {
+          await emailService.sendInvoiceEmail(invoiceObj, client);
+          await whatsappService.sendInvoiceDue(invoiceObj, client);
+        } catch (dispatchErr) {
+          console.error('[Invoices] Failed to send new invoice notifications:', dispatchErr);
+        }
       }
 
       await logAuditAction(
@@ -189,6 +227,27 @@ export default function Invoices() {
     try {
       const target = invoices.find(i => i.id === invoiceId);
       await updateDoc(doc(db, 'invoices', invoiceId), { status: newStatus });
+
+      if (newStatus === 'Paid') {
+        await logActivity(
+          'invoice_paid',
+          'Invoice Paid',
+          `Invoice ${target?.invoiceNumber || invoiceId} of amount ${formatINR(target?.amount || 0)} marked as Paid for client ${target?.clientName || 'Client'}`
+        );
+      }
+
+      // Trigger notifications if invoice Sent
+      if (newStatus === 'Sent' && target) {
+        const client = clients.find(c => c.id === target.clientId);
+        if (client) {
+          try {
+            await emailService.sendInvoiceEmail(target, client);
+            await whatsappService.sendInvoiceDue(target, client);
+          } catch (dispatchErr) {
+            console.error('[Invoices] Failed to send updated invoice notifications:', dispatchErr);
+          }
+        }
+      }
 
       // Timeline log if project linked
       if (target?.projectId) {
@@ -215,7 +274,7 @@ export default function Invoices() {
 
   const handleDeleteInvoice = async (invoiceId) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can delete invoices.');
+      triggerToast('Access Denied: Only Super Admin can delete invoices.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this invoice?')) return;
