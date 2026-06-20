@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 function formatCurrencyINR(amount) {
@@ -15,15 +15,34 @@ export default function AnalyticsDashboard() {
   const [tasks, setTasks] = useState([]);
   const [services, setServices] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [funnelData, setFunnelData] = useState({
+    visitors: 0,
+    leads: 0,
+    audits: 0,
+    proposals: 0,
+    clients: 0,
+    revenue: 0
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let loadedCount = 0;
-    const totalCollections = 7;
+    const totalCollections = 8;
     const checkLoaded = () => {
       loadedCount++;
       if (loadedCount >= totalCollections) setLoading(false);
     };
+
+    const unsubFunnel = onSnapshot(
+      doc(db, 'analytics', 'funnel'),
+      (snap) => {
+        if (snap.exists()) {
+          setFunnelData(snap.data());
+        }
+        checkLoaded();
+      },
+      () => checkLoaded()
+    );
 
     const unsubLeads = onSnapshot(
       query(collection(db, 'leads'), orderBy('createdAt', 'asc')),
@@ -75,6 +94,7 @@ export default function AnalyticsDashboard() {
       unsubTasks();
       unsubServices();
       unsubBookings();
+      unsubFunnel();
     };
   }, []);
 
@@ -293,6 +313,85 @@ export default function AnalyticsDashboard() {
           <span className="text-lg font-semibold text-white font-mono">
             {leads.length > 0 ? Math.round((leads.filter(l => l.status === 'Won').length / leads.length) * 100) : 0}%
           </span>
+        </div>
+      </div>
+
+      {/* Conversion Funnel Widget */}
+      <div className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-6 w-full relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-[#5E0ED7]/5 rounded-full pointer-events-none blur-[100px] -z-10" />
+        
+        <div>
+          <h3 className="text-sm font-semibold tracking-wider uppercase text-white">
+            Client Acquisition Conversion Funnel
+          </h3>
+          <p className="text-xs text-gray-500 mt-1 font-light">
+            Real-time track of visitors converting down to leads, audits, proposals, clients, and paid revenue.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 pt-2">
+          {[
+            { label: 'Visitors', value: funnelData.visitors, sub: 'Baseline traffic', percent: 100, color: 'bg-white' },
+            { 
+              label: 'Leads', 
+              value: funnelData.leads, 
+              sub: 'Contact / Magnets', 
+              percent: funnelData.visitors > 0 ? Math.round((funnelData.leads / funnelData.visitors) * 100) : 0,
+              drop: funnelData.visitors > 0 ? Math.round((funnelData.leads / funnelData.visitors) * 100) : 0, 
+              color: 'bg-white/80' 
+            },
+            { 
+              label: 'AI Audits', 
+              value: funnelData.audits, 
+              sub: 'Systems Audited', 
+              percent: funnelData.leads > 0 ? Math.round((funnelData.audits / funnelData.leads) * 100) : 0,
+              drop: funnelData.visitors > 0 ? Math.round((funnelData.audits / funnelData.visitors) * 100) : 0, 
+              color: 'bg-purple-400' 
+            },
+            { 
+              label: 'Proposals', 
+              value: funnelData.proposals, 
+              sub: 'Contracts Out', 
+              percent: funnelData.audits > 0 ? Math.round((funnelData.proposals / funnelData.audits) * 100) : 0,
+              drop: funnelData.visitors > 0 ? Math.round((funnelData.proposals / funnelData.visitors) * 100) : 0, 
+              color: 'bg-purple-600' 
+            },
+            { 
+              label: 'Clients Won', 
+              value: funnelData.clients, 
+              sub: 'Active Accounts', 
+              percent: funnelData.proposals > 0 ? Math.round((funnelData.clients / funnelData.proposals) * 100) : 0,
+              drop: funnelData.visitors > 0 ? Math.round((funnelData.clients / funnelData.visitors) * 100) : 0, 
+              color: 'bg-emerald-400' 
+            }
+          ].map((step, idx) => (
+            <div key={step.label} className="p-4 rounded-xl border border-white/5 bg-black/40 flex flex-col justify-between gap-4 relative">
+              <div>
+                <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest block">Step 0{idx + 1}</span>
+                <span className="text-xs font-bold text-white uppercase tracking-wider block mt-1">{step.label}</span>
+                <span className="text-2xl font-bold text-white font-mono block mt-2">{step.value.toLocaleString()}</span>
+                <span className="text-[10px] text-gray-400 font-light block mt-1">{step.sub}</span>
+              </div>
+              
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[9px] font-mono text-gray-500 uppercase">
+                  <span>{idx === 0 ? 'Baseline' : 'Conv. Rate'}</span>
+                  <span className={idx > 0 && step.percent > 0 ? 'text-emerald-400 font-bold' : ''}>{step.percent}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div 
+                    className={`${step.color} h-full transition-all duration-1000`}
+                    style={{ width: `${idx === 0 ? 100 : step.percent}%` }}
+                  />
+                </div>
+                {idx > 0 && (
+                  <span className="text-[8px] font-mono text-gray-600 block text-right uppercase">
+                    {step.drop}% of traffic
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

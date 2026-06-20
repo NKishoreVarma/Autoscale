@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import { ArrowLeft, ArrowRight, User, Briefcase, Calendar, ShieldAlert } from 'lucide-react';
 import { calculateLeadScore } from './LeadsList';
 import { useAuth } from '../../context/AuthContext';
+import { emailService } from '../../utils/emailService';
 import { logAuditAction } from '../../utils/auditLogger';
 
 const COLUMNS = [
@@ -24,74 +25,23 @@ const SCORE_COLORS = {
 
 export default function PipelineBoard() {
   const { user: authUser, userRole } = useAuth();
-  const [contactForms, setContactForms] = useState([]);
-  const [bookings, setBookings] = useState([]);
+  const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Load contactForms and bookings in real-time
+  // Load leads in real-time
   useEffect(() => {
-    const unsubContacts = onSnapshot(
-      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc')),
+    const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
+    const unsubLeads = onSnapshot(
+      q,
       (snap) => {
-        setContactForms(snap.docs.map(d => ({ id: d.id, _collection: 'contactForms', ...d.data() })));
+        setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
       },
-      (err) => console.error("Error fetching pipeline contact forms:", err)
+      (err) => console.error("Error fetching pipeline leads:", err)
     );
 
-    const unsubBookings = onSnapshot(
-      query(collection(db, 'bookings'), orderBy('createdAt', 'desc')),
-      (snap) => {
-        setBookings(snap.docs.map(d => ({ id: d.id, _collection: 'bookings', ...d.data() })));
-        setLoading(false);
-      },
-      (err) => console.error("Error fetching pipeline bookings:", err)
-    );
-
-    return () => {
-      unsubContacts();
-      unsubBookings();
-    };
+    return () => unsubLeads();
   }, []);
-
-  // Merge lists
-  const leads = React.useMemo(() => {
-    const list = [];
-
-    contactForms.forEach(c => {
-      list.push({
-        id: c.id,
-        name: c.name || '',
-        company: c.company || '',
-        email: c.email || '',
-        phone: c.phone || '',
-        service: c.service || 'Custom Systems',
-        industry: c.industry || 'Other',
-        message: c.message || '',
-        status: c.status || 'New',
-        createdAt: c.createdAt,
-        _collection: 'contactForms'
-      });
-    });
-
-    bookings.forEach(b => {
-      list.push({
-        id: b.id,
-        name: b.name || '',
-        company: b.company || '',
-        email: b.email || '',
-        phone: b.phone || '',
-        service: b.serviceRequested || b.service || 'Custom Systems',
-        industry: b.industry || 'Other',
-        message: b.message || '',
-        status: b.status || 'New',
-        createdAt: b.createdAt,
-        _collection: 'bookings'
-      });
-    });
-
-    return list;
-  }, [contactForms, bookings]);
 
   // Transition lead stage
   const moveLead = async (leadId, currentStatus, direction) => {
@@ -103,18 +53,29 @@ export default function PipelineBoard() {
 
     if (newIndex >= 0 && newIndex < COLUMNS.length) {
       const newStatus = COLUMNS[newIndex].id;
-      const collectionName = target._collection;
 
       try {
-        await updateDoc(doc(db, collectionName, leadId), { 
+        await updateDoc(doc(db, 'leads', leadId), { 
           status: newStatus,
           updatedAt: serverTimestamp()
         });
 
-        // Add to emailLogs/whatsappLogs automatically if promoted
+        // Trigger Alert when qualified
+        if (newStatus === 'Qualified') {
+          try {
+            await emailService.sendLeadQualifiedAlert(target);
+          } catch (eErr) {
+            console.error('Email alert trigger failed:', eErr);
+          }
+        }
+
+        // Add to communications automatically if promoted
         if (newStatus === 'Proposal Sent') {
           // Log automated email sequence trigger
-          await addDoc(collection(db, 'emailLogs'), {
+          await addDoc(collection(db, 'communications'), {
+            type: 'email',
+            recipientEmail: target.email || 'unknown',
+            recipientName: target.name || 'Client',
             leadEmail: target.email || 'unknown',
             leadName: target.name || 'Client',
             subject: 'Proposal Issued for Autoscale Solutions',
@@ -124,12 +85,16 @@ export default function PipelineBoard() {
             timestamp: serverTimestamp()
           });
 
-          await addDoc(collection(db, 'whatsappLogs'), {
+          await addDoc(collection(db, 'communications'), {
+            type: 'whatsapp',
+            recipientPhone: target.phone || 'N/A',
+            recipientName: target.name || 'Client',
             phone: target.phone || 'N/A',
             name: target.name || 'Client',
             templateUsed: 'Proposal Sent Template',
             status: 'sent',
             payload: `Your Autoscale proposal for ${target.service} has been successfully sent to ${target.email}.`,
+            body: `Your Autoscale proposal for ${target.service} has been successfully sent to ${target.email}.`,
             timestamp: serverTimestamp()
           });
         }
@@ -139,7 +104,7 @@ export default function PipelineBoard() {
           authUser?.email || 'admin@autoscale.systems',
           userRole || 'admin',
           'Updated Pipeline Stage',
-          collectionName,
+          'leads',
           leadId,
           `Shifted lead "${target.name}" from status "${currentStatus}" to "${newStatus}"`
         );

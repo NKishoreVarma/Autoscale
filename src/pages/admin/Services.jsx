@@ -1,9 +1,10 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import {
-  Search, X, Plus, Star, Eye, EyeOff, Trash2, ArrowUp, ArrowDown, Edit3
+Search, X, Plus, Star, Eye, EyeOff, Trash2, ArrowUp, ArrowDown, Edit3
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -131,7 +132,7 @@ export default function Services() {
 
   const handleDeleteService = async (serviceId) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can delete records.');
+      triggerToast('Access Denied: Only Super Admin can delete records.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this service?')) return;
@@ -144,7 +145,7 @@ export default function Services() {
 
   const handleReorder = async (index, direction) => {
     if (!isAdminOrSuper) {
-      alert('Access Denied: Only Admins can reorder services.');
+      triggerToast('Access Denied: Only Admins can reorder services.', 'error');
       return;
     }
 

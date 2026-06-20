@@ -3,10 +3,11 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../hooks/useNotifications';
 import NotificationCenter from './NotificationCenter';
+import CommandBar from './CommandBar';
 import {
   LayoutDashboard, Users, BarChart3, Settings, LogOut, Menu, X, Bell,
   Building2, FolderKanban, Package, Calendar, Inbox, UsersRound, Lock,
-  CheckSquare, FileText, Cpu, Mail, Globe, GitBranch
+  CheckSquare, FileText, Cpu, Mail, Globe, GitBranch, Play, Search
 } from 'lucide-react';
 
 const navItems = [
@@ -29,6 +30,7 @@ const navItems = [
   { name: 'Users', path: '/admin/users', icon: UsersRound, restricted: true },
   { name: 'Notifications', path: '/admin/notifications', icon: Bell },
   { name: 'Settings', path: '/admin/settings', icon: Settings, restricted: true },
+  { name: 'Simulator', path: '/admin/simulator', icon: Play }
 ];
 
 export default function AdminLayout() {
@@ -181,8 +183,21 @@ export default function AdminLayout() {
       {/* Viewport Dashboard Content */}
       <main className="flex-grow flex flex-col min-h-screen pt-20 lg:pt-0 overflow-y-auto z-10 relative">
         <div className="p-6 md:p-10 max-w-7xl w-full mx-auto flex-grow flex flex-col">
-          {/* Top bar with notification bell (desktop) */}
-          <div className="hidden lg:flex items-center justify-end mb-6 gap-4">
+          {/* Top bar with search & notification bell (desktop) */}
+          <div className="hidden lg:flex items-center justify-between mb-6 border-b border-white/5 pb-4">
+            {/* Spotlight Search Trigger */}
+            <button
+              onClick={() => {
+                const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true });
+                window.dispatchEvent(event);
+              }}
+              className="flex items-center gap-3 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.02] hover:bg-white/5 text-gray-400 hover:text-white transition duration-200 text-xs w-64 text-left font-light"
+            >
+              <Search className="w-4 h-4 text-gray-500" />
+              <span className="flex-grow">Search...</span>
+              <span className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded font-mono text-[9px] text-gray-500">⌘K</span>
+            </button>
+
             <button
               onClick={() => setNotificationsOpen(!notificationsOpen)}
               className="relative p-2 rounded-lg hover:bg-white/5 transition"
@@ -205,6 +220,9 @@ export default function AdminLayout() {
         isOpen={notificationsOpen}
         onClose={() => setNotificationsOpen(false)}
       />
+
+      {/* Spotlight Command Search Modal */}
+      <CommandBar />
     </div>
   );
 }

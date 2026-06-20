@@ -75,7 +75,8 @@ export default function FAQs() {
               >
                 <button
                   onClick={() => setOpenIdx(isOpen ? null : idx)}
-                  className="w-full flex justify-between items-center text-left"
+                  aria-expanded={isOpen}
+                  className="w-full flex justify-between items-center text-left focus-visible:ring-1 focus-visible:ring-[#5E0ED7] focus-visible:outline-none rounded-lg"
                 >
                   <span className="text-sm font-semibold text-white uppercase tracking-wide flex items-center gap-3">
                     <HelpCircle className="w-4 h-4 text-gray-500 flex-shrink-0" />

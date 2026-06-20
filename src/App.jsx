@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import AuthDebug from './components/AuthDebug';
+import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
+import { db } from './firebase';
 
 // Light Core Components (Static)
 import Navbar from './components/Navbar';
@@ -49,10 +50,22 @@ const AIAudit = React.lazy(() => import('./pages/admin/AIAudit'));
 const ProposalGenerator = React.lazy(() => import('./pages/admin/ProposalGenerator'));
 const CommunicationHub = React.lazy(() => import('./pages/admin/CommunicationHub'));
 const WebsiteCMS = React.lazy(() => import('./pages/admin/WebsiteCMS'));
+const Simulator = React.lazy(() => import('./pages/admin/Simulator'));
 
 // Lazy Client Pages
 const ClientLogin = React.lazy(() => import('./pages/client/ClientLogin'));
 const ClientDashboard = React.lazy(() => import('./pages/client/ClientDashboard'));
+
+// Lazy Legal / Trust Pages & Components
+const PrivacyPolicy = React.lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = React.lazy(() => import('./pages/TermsOfService'));
+const AboutAndWhy = React.lazy(() => import('./components/AboutAndWhy'));
+
+// Lazy Client Acquisition Public Pages
+const FreeAudit = React.lazy(() => import('./pages/FreeAudit'));
+const Resources = React.lazy(() => import('./pages/Resources'));
+const BookMeeting = React.lazy(() => import('./pages/BookMeeting'));
+const Blog = React.lazy(() => import('./pages/Blog'));
 
 // Sleek loading fallback for code-split lazy loading
 function LoadingFallback() {
@@ -91,6 +104,9 @@ function PublicHome() {
 
       {/* 2b. Revenue Leak Map (Flowchart & Fixes) */}
       <RevenueLeakMap />
+
+      {/* About & Trust Layer */}
+      <AboutAndWhy />
 
       {/* 3. Business Systems (AI Agents, WhatsApp, Lead Gen, Support, Automation, Custom Systems) */}
       <SolutionsLibrary />
@@ -175,6 +191,46 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [navigate]);
 
+  // Page View and Funnel baseline visitor tracking hook
+  useEffect(() => {
+    const trackPageView = async () => {
+      const path = location.pathname;
+      if (path === '/' || path === '/free-audit' || path === '/resources' || path === '/book' || path === '/blog') {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const localKey = `autoscale_visitor_${todayStr}`;
+        
+        // Prevent double counts for the same session per 24h
+        if (localStorage.getItem(localKey)) return;
+        localStorage.setItem(localKey, '1');
+
+        try {
+          const docRef = doc(db, 'analytics', 'funnel');
+          const snap = await getDoc(docRef);
+          
+          if (snap.exists()) {
+            await updateDoc(docRef, {
+              visitors: increment(1)
+            });
+          } else {
+            await setDoc(docRef, {
+              visitors: 1,
+              leads: 0,
+              audits: 0,
+              proposals: 0,
+              clients: 0,
+              revenue: 0
+            }, { merge: true });
+          }
+          console.log('[Analytics] Visitor logged successfully.');
+        } catch (err) {
+          console.warn('[Analytics] Visitor log blocked by permissions/network:', err);
+        }
+      }
+    };
+
+    trackPageView();
+  }, [location.pathname]);
+
   return (
     <div className="relative min-h-screen text-white selection:bg-white selection:text-black overflow-x-hidden bg-transparent">
       {/* Global Video Background with visibility control and poster fallback */}
@@ -220,7 +276,14 @@ export default function App() {
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<PublicHome />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
             <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/free-audit" element={<FreeAudit />} />
+            <Route path="/resources" element={<Resources />} />
+            <Route path="/book" element={<BookMeeting />} />
+            <Route path="/blog" element={<Blog />} />
+            <Route path="/blog/:slug" element={<Blog />} />
 
             {/* Client Portal Routes */}
             <Route path="/client/login" element={<ClientLogin />} />
@@ -263,6 +326,7 @@ export default function App() {
               <Route path="users" element={<Users />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="settings" element={<AdminSettings />} />
+              <Route path="simulator" element={<Simulator />} />
             </Route>
 
             {/* Fallback Catch-all Redirect */}
@@ -270,9 +334,6 @@ export default function App() {
           </Routes>
         </Suspense>
       </div>
-
-      {/* STEP 6: Dev-only Debug Panel */}
-      {import.meta.env.DEV && <AuthDebug />}
 
       {/* Global Toast Notifier */}
       <Toast />

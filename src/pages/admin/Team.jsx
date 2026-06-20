@@ -1,13 +1,16 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
 import {
-  Search, X, Plus, User, Mail, Shield, Trash2, Calendar, Lock
+Search, X, Plus, User, Mail, Shield, Trash2, Calendar, Lock, Briefcase, Power, CheckCircle
 } from 'lucide-react';
 
 const ROLES = ['Founder', 'Manager', 'Developer', 'Designer', 'Automation Engineer'];
+const DEPARTMENTS = ['Management', 'Development', 'Sales', 'Engineering', 'Design'];
+
 const ROLE_COLORS = {
   Founder: 'border-red-500/20 text-red-400 bg-red-950/10',
   Manager: 'border-purple-500/20 text-purple-400 bg-purple-950/10',
@@ -20,7 +23,8 @@ const EMPTY_MEMBER = {
   name: '',
   email: '',
   role: 'Developer',
-  isActive: true,
+  department: 'Development',
+  status: 'Active',
 };
 
 export default function Team() {
@@ -37,19 +41,19 @@ export default function Team() {
   // Sync team members and auto-seed if empty
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'teamMembers'), orderBy('name', 'asc')),
+      query(collection(db, 'team'), orderBy('name', 'asc')),
       async (snapshot) => {
         if (snapshot.empty) {
-          console.log('[Team] teamMembers collection is empty. Seeding defaults...');
+          console.log('[Team] team collection is empty. Seeding defaults...');
           const defaults = [
-            { name: "Kishore Varma", email: "kishorevarma2205@gmail.com", role: "Founder", isActive: true, joinedAt: new Date(2026, 0, 1) },
-            { name: "Priya Nair", email: "priya@autoscale.systems", role: "Automation Engineer", isActive: true, joinedAt: new Date(2026, 1, 15) },
-            { name: "Amit Patel", email: "amit@autoscale.systems", role: "Developer", isActive: true, joinedAt: new Date(2026, 2, 10) }
+            { name: "Kishore Varma", email: "kishorevarma2205@gmail.com", role: "Founder", department: "Management", status: "Active", lastLogin: null, joinedAt: new Date(2026, 0, 1).toISOString().split('T')[0] },
+            { name: "Priya Nair", email: "priya@autoscale.systems", role: "Automation Engineer", department: "Engineering", status: "Active", lastLogin: null, joinedAt: new Date(2026, 1, 15).toISOString().split('T')[0] },
+            { name: "Amit Patel", email: "amit@autoscale.systems", role: "Developer", department: "Development", status: "Active", lastLogin: null, joinedAt: new Date(2026, 2, 10).toISOString().split('T')[0] }
           ];
 
           for (const d of defaults) {
             try {
-              await addDoc(collection(db, 'teamMembers'), {
+              await addDoc(collection(db, 'team'), {
                 ...d,
                 createdAt: serverTimestamp()
               });
@@ -63,7 +67,7 @@ export default function Team() {
         }
       },
       (err) => {
-        console.error('Error listening to teamMembers:', err);
+        console.error('Error listening to team:', err);
         setLoading(false);
       }
     );
@@ -76,10 +80,11 @@ export default function Team() {
 
     setSaving(true);
     try {
-      const docRef = await addDoc(collection(db, 'teamMembers'), {
+      const docRef = await addDoc(collection(db, 'team'), {
         ...formData,
         email: formData.email.trim().toLowerCase(),
         name: formData.name.trim(),
+        lastLogin: null,
         joinedAt: new Date().toISOString().split('T')[0],
         createdAt: serverTimestamp(),
       });
@@ -88,9 +93,9 @@ export default function Team() {
         authUser?.email || 'admin@autoscale.systems',
         userRole || 'admin',
         'Added Team Member',
-        'teamMembers',
+        'team',
         docRef.id,
-        `Added team member "${formData.name.trim()}" as a ${formData.role}`
+        `Added team member "${formData.name.trim()}" in ${formData.department} as a ${formData.role}`
       );
 
       setFormData({ ...EMPTY_MEMBER });
@@ -103,18 +108,18 @@ export default function Team() {
 
   const handleRoleChange = async (memberId, newRole) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can change clearances.');
+      triggerToast('Access Denied: Only Super Admin can change clearances.', 'error');
       return;
     }
     try {
       const target = members.find(m => m.id === memberId);
-      await updateDoc(doc(db, 'teamMembers', memberId), { role: newRole });
+      await updateDoc(doc(db, 'team', memberId), { role: newRole });
 
       await logAuditAction(
         authUser?.email || 'super_admin@autoscale.systems',
         userRole || 'super_admin',
         'Changed Team Member Role',
-        'teamMembers',
+        'team',
         memberId,
         `Updated role of "${target?.name || memberId}" to "${newRole}"`
       );
@@ -123,21 +128,68 @@ export default function Team() {
     }
   };
 
+  const handleDepartmentChange = async (memberId, newDept) => {
+    if (!isSuperAdmin) {
+      triggerToast('Access Denied: Only Super Admin can change clearances.', 'error');
+      return;
+    }
+    try {
+      const target = members.find(m => m.id === memberId);
+      await updateDoc(doc(db, 'team', memberId), { department: newDept });
+
+      await logAuditAction(
+        authUser?.email || 'super_admin@autoscale.systems',
+        userRole || 'super_admin',
+        'Changed Team Member Dept',
+        'team',
+        memberId,
+        `Updated department of "${target?.name || memberId}" to "${newDept}"`
+      );
+    } catch (err) {
+      console.error('Error updating department:', err);
+    }
+  };
+
+  const handleToggleSuspension = async (memberId) => {
+    if (!isSuperAdmin) {
+      triggerToast('Access Denied: Only Super Admin can suspend team members.', 'error');
+      return;
+    }
+    try {
+      const target = members.find(m => m.id === memberId);
+      if (!target) return;
+
+      const newStatus = target.status === 'Suspended' ? 'Active' : 'Suspended';
+      await updateDoc(doc(db, 'team', memberId), { status: newStatus });
+
+      await logAuditAction(
+        authUser?.email || 'super_admin@autoscale.systems',
+        userRole || 'super_admin',
+        'Toggled Team Member Suspension',
+        'team',
+        memberId,
+        `Updated suspension status of "${target.name}" to "${newStatus}"`
+      );
+    } catch (err) {
+      console.error('Error toggling suspension:', err);
+    }
+  };
+
   const handleDeleteMember = async (memberId) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can remove team members.');
+      triggerToast('Access Denied: Only Super Admin can remove team members.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this team member?')) return;
     try {
       const target = members.find(m => m.id === memberId);
-      await deleteDoc(doc(db, 'teamMembers', memberId));
+      await deleteDoc(doc(db, 'team', memberId));
 
       await logAuditAction(
         authUser?.email || 'super_admin@autoscale.systems',
         userRole || 'super_admin',
         'Deleted Team Member',
-        'teamMembers',
+        'team',
         memberId,
         `Removed team member "${target?.name || memberId}"`
       );
@@ -150,7 +202,8 @@ export default function Team() {
     const matchesSearch =
       member.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       member.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.role?.toLowerCase().includes(searchTerm.toLowerCase());
+      member.role?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.department?.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesSearch;
   });
 
@@ -213,7 +266,9 @@ export default function Team() {
                 <tr className="border-b border-white/5 text-[10px] font-bold tracking-widest text-gray-400 uppercase bg-white/[0.02]">
                   <th className="px-6 py-4">Name</th>
                   <th className="px-6 py-4">Email</th>
+                  <th className="px-6 py-4">Department</th>
                   <th className="px-6 py-4">SaaS Clearance Role</th>
+                  <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Joined Date</th>
                   {isSuperAdmin && <th className="px-6 py-4 text-right">Actions</th>}
                 </tr>
@@ -231,6 +286,21 @@ export default function Team() {
                     <td className="px-6 py-4">
                       {isSuperAdmin ? (
                         <select
+                          value={member.department || 'Development'}
+                          onChange={(e) => handleDepartmentChange(member.id, e.target.value)}
+                          className="bg-black border border-white/10 rounded-lg px-2 py-1 text-xs text-white focus:outline-none"
+                        >
+                          {DEPARTMENTS.map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-gray-300">{member.department || 'Development'}</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {isSuperAdmin ? (
+                        <select
                           value={member.role || 'Developer'}
                           onChange={(e) => handleRoleChange(member.id, e.target.value)}
                           className="bg-black border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none"
@@ -245,17 +315,38 @@ export default function Team() {
                         </span>
                       )}
                     </td>
+                    <td className="px-6 py-4">
+                      <span className={`text-[9px] font-bold tracking-widest px-2 py-0.5 rounded border uppercase ${
+                        member.status === 'Active' ? 'border-emerald-500/20 text-emerald-400 bg-emerald-950/10' : 'border-rose-500/20 text-rose-400 bg-rose-950/10'
+                      }`}>
+                        {member.status || 'Active'}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-right text-gray-400 font-mono text-xs">
                       {member.joinedAt || '—'}
                     </td>
                     {isSuperAdmin && (
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => handleDeleteMember(member.id)}
-                          className="w-7 h-7 rounded-full border border-red-500/20 hover:bg-red-950/20 text-red-400 hover:text-red-300 flex items-center justify-center transition ml-auto"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleToggleSuspension(member.id)}
+                            className={`w-7 h-7 rounded-full border flex items-center justify-center transition ${
+                              member.status === 'Suspended' 
+                                ? 'border-emerald-500/20 hover:bg-emerald-950/20 text-emerald-400' 
+                                : 'border-rose-500/20 hover:bg-rose-950/20 text-rose-400'
+                            }`}
+                            title={member.status === 'Suspended' ? 'Activate User' : 'Suspend User'}
+                          >
+                            {member.status === 'Suspended' ? <CheckCircle className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteMember(member.id)}
+                            className="w-7 h-7 rounded-full border border-red-500/20 hover:bg-red-950/20 text-red-400 hover:text-red-300 flex items-center justify-center transition"
+                            title="Remove User"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -299,16 +390,29 @@ export default function Team() {
                 />
               </div>
 
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Email Address *</label>
+                <input
+                  type="email"
+                  required
+                  value={formData.email}
+                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                  className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white normal-case"
+                />
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Email Address *</label>
-                  <input
-                    type="email"
-                    required
-                    value={formData.email}
-                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                    className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white normal-case"
-                  />
+                  <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Department</label>
+                  <select
+                    value={formData.department}
+                    onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
+                    className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                  >
+                    {DEPARTMENTS.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Role Access Level</label>

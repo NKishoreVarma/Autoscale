@@ -9,6 +9,7 @@ import {
   Cpu, MessageCircle, Server, ShieldCheck, Activity, Globe, GitBranch, RefreshCw, PhoneCall, Bell
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { DashboardSkeleton } from '../ui/Skeletons';
 
 function formatCurrencyINR(amount) {
   if (amount === 0) return '₹0';
@@ -21,11 +22,12 @@ export default function DashboardOverview() {
   const [projects, setProjects] = useState([]);
   const [payments, setPayments] = useState([]);
   const [invoices, setInvoices] = useState([]);
-  const [contactForms, setContactForms] = useState([]);
-  const [bookings, setBookings] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [proposals, setProposals] = useState([]);
   const [services, setServices] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -37,6 +39,7 @@ export default function DashboardOverview() {
     storage: 'ONLINE',
     smtp: 'ONLINE',
     twilio: 'ONLINE',
+    google_calendar: 'ONLINE',
     website: 'ONLINE'
   });
 
@@ -55,7 +58,7 @@ export default function DashboardOverview() {
   // Listen to Firestore feeds
   useEffect(() => {
     let loadedCollections = 0;
-    const totalCollections = 9;
+    const totalCollections = 10;
     const checkLoaded = () => {
       loadedCollections++;
       if (loadedCollections >= totalCollections) setLoading(false);
@@ -85,15 +88,15 @@ export default function DashboardOverview() {
       () => checkLoaded()
     );
 
-    const unsubContactForms = onSnapshot(
-      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc')),
-      (snap) => { setContactForms(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
+    const unsubLeads = onSnapshot(
+      query(collection(db, 'leads'), orderBy('createdAt', 'desc')),
+      (snap) => { setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
       () => checkLoaded()
     );
 
-    const unsubBookings = onSnapshot(
-      query(collection(db, 'bookings'), orderBy('createdAt', 'desc')),
-      (snap) => { setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
+    const unsubProposals = onSnapshot(
+      query(collection(db, 'proposals'), orderBy('createdAt', 'desc')),
+      (snap) => { setProposals(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
       () => checkLoaded()
     );
 
@@ -115,16 +118,23 @@ export default function DashboardOverview() {
       () => checkLoaded()
     );
 
+    const unsubActivity = onSnapshot(
+      query(collection(db, 'activity_logs'), orderBy('createdAt', 'desc'), limit(100)),
+      (snap) => { setActivityLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))); checkLoaded(); },
+      () => checkLoaded()
+    );
+
     return () => {
       unsubClients();
       unsubProjects();
       unsubPayments();
       unsubInvoices();
-      unsubContactForms();
-      unsubBookings();
+      unsubLeads();
+      unsubProposals();
       unsubServices();
       unsubMeetings();
       unsubNotifications();
+      unsubActivity();
     };
   }, []);
 
@@ -136,34 +146,26 @@ export default function DashboardOverview() {
   };
 
   // Metric calculations
-  const totalLeads = contactForms.length + bookings.length;
+  const totalLeads = leads.length;
   
   // Leads Today (since 00:00)
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const leadsToday = contactForms.filter(c => {
-    const d = c.createdAt?.toDate ? c.createdAt.toDate() : null;
-    return d && d >= startOfToday;
-  }).length + bookings.filter(b => {
-    const d = b.createdAt?.toDate ? b.createdAt.toDate() : null;
+  const leadsToday = leads.filter(l => {
+    const d = l.createdAt?.toDate ? l.createdAt.toDate() : null;
     return d && d >= startOfToday;
   }).length;
 
-  const wonLeads = contactForms.filter(c => c.status === 'Won').length + bookings.filter(b => b.status === 'Won' || b.status === 'Completed').length;
-  const activeProjects = projects.filter(p => p.status === 'Planning' || p.status === 'Building' || p.status === 'Testing').length;
+  const wonLeads = leads.filter(l => l.status === 'Won').length;
+  const activeProjects = projects.filter(p => (p.status || '').toLowerCase() !== 'completed').length;
   const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
 
-  // Pipeline Value (Sum of budget/contract value of open leads)
-  const openLeads = [
-    ...contactForms.filter(c => c.status !== 'Won' && c.status !== 'Lost' && c.status !== 'Completed' && c.status !== 'Cancelled'),
-    ...bookings.filter(b => b.status !== 'Won' && b.status !== 'Lost' && b.status !== 'Completed' && b.status !== 'Cancelled')
-  ];
-  const pipelineValue = openLeads.reduce((sum, l) => sum + (Number(l.contractValue || l.budget) || 15000), 0);
+  // Pipeline Value (Sum of budget/contract value of open proposals)
+  const openProposals = proposals.filter(p => p.status !== 'Accepted' && p.status !== 'Rejected');
+  const pipelineValue = openProposals.reduce((sum, p) => sum + (Number(p.price) || 0), 0);
 
-  // Paid Revenue calculations
-  const invoicePaid = invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + (i.amount || 0), 0);
-  const paymentPaid = payments.filter(p => p.status === 'Paid').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const paidRevenue = invoicePaid + paymentPaid;
+  // Paid Revenue calculations (strictly from Paid Invoices)
+  const paidRevenue = invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + (i.amount || 0), 0);
 
   // Sync state to analytics/dashboard with deduplication and debouncing
   const lastSyncRef = useRef("");
@@ -179,8 +181,8 @@ export default function DashboardOverview() {
       runningProjects: activeProjects,
       totalServices: services.length,
       bookingsToday: leadsToday,
-      bookingsThisMonth: bookings.length,
-      totalBookings: bookings.length,
+      bookingsThisMonth: leads.filter(l => l.leadSource === 'Book Audit').length,
+      totalBookings: leads.filter(l => l.leadSource === 'Book Audit').length,
       revenueGenerated: paidRevenue,
       monthlyRevenue: paidRevenue
     };
@@ -196,7 +198,7 @@ export default function DashboardOverview() {
 
     const timer = setTimeout(syncMetrics, 2000);
     return () => clearTimeout(timer);
-  }, [clients, projects, payments, invoices, bookings, contactForms, services, loading, totalLeads, activeProjects, leadsToday, paidRevenue]);
+  }, [clients, projects, payments, invoices, leads, proposals, services, loading, totalLeads, activeProjects, leadsToday, paidRevenue]);
 
   const statCards = [
     { name: 'Leads Today', value: leadsToday, icon: Users, desc: 'Captured since midnight' },
@@ -208,38 +210,34 @@ export default function DashboardOverview() {
   ];
 
   const getStatusBadge = (statusVal) => {
-    if (statusVal === 'ONLINE') {
-      return <span className="text-emerald-400 font-bold uppercase tracking-wider text-[10px]">ONLINE</span>;
+    if (statusVal === 'Connected') {
+      return <span className="text-emerald-400 font-bold uppercase tracking-wider text-[10px]">CONNECTED</span>;
     }
-    if (statusVal === 'WARNING') {
-      return <span className="text-amber-400 font-bold uppercase tracking-wider text-[10px]">WARNING</span>;
+    if (statusVal === 'Configuration Missing') {
+      return <span className="text-amber-400 font-bold uppercase tracking-wider text-[10px]">CONFIG MISSING</span>;
     }
-    return <span className="text-rose-500 font-bold uppercase tracking-wider text-[10px]">OFFLINE</span>;
+    return <span className="text-rose-500 font-bold uppercase tracking-wider text-[10px]">DISCONNECTED</span>;
   };
 
-  const hasOffline = Object.values(healthStatus).some(v => v === 'OFFLINE');
-  const hasWarning = Object.values(healthStatus).some(v => v === 'WARNING');
+  const hasDisconnected = Object.values(healthStatus).some(v => v === 'Disconnected');
+  const hasConfigMissing = Object.values(healthStatus).some(v => v === 'Configuration Missing');
 
   let overallStatusLabel = 'All Systems Operational';
   let overallStatusColor = 'text-emerald-400 border-emerald-500/20 bg-emerald-950/20';
   let overallBulletColor = 'bg-emerald-400';
 
-  if (hasOffline) {
-    overallStatusLabel = 'Degraded Performance';
+  if (hasDisconnected) {
+    overallStatusLabel = 'System Disconnected';
     overallStatusColor = 'text-rose-400 border-rose-500/20 bg-rose-950/20';
     overallBulletColor = 'bg-rose-500';
-  } else if (hasWarning) {
-    overallStatusLabel = 'Gateway Warning';
+  } else if (hasConfigMissing) {
+    overallStatusLabel = 'Gateway Setup Required';
     overallStatusColor = 'text-amber-400 border-amber-500/20 bg-amber-950/20';
     overallBulletColor = 'bg-amber-400';
   }
 
   if (loading) {
-    return (
-      <div className="flex-grow flex items-center justify-center">
-        <div className="w-6 h-6 border-t border-r border-white rounded-full animate-spin" />
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   return (
@@ -329,53 +327,94 @@ export default function DashboardOverview() {
                 {getStatusBadge(healthStatus.smtp)}
               </div>
             </div>
+            <div className="p-4 rounded-lg bg-black border border-white/5 flex flex-col gap-1.5">
+              <span className="text-gray-500 font-bold uppercase tracking-wider text-[9px]">Google Calendar Gateway</span>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-white">google-calendar-api</span>
+                {getStatusBadge(healthStatus.google_calendar)}
+              </div>
+            </div>
+            <div className="p-4 rounded-lg bg-black border border-white/5 flex flex-col gap-1.5">
+              <span className="text-gray-500 font-bold uppercase tracking-wider text-[9px]">Firebase Storage Bucket</span>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-white">storage.autoscale.systems</span>
+                {getStatusBadge(healthStatus.storage)}
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Dynamic Deployment / Build Info */}
+        {/* Global Activity Stream */}
         <div
-          className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-6"
+          className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-4"
           style={{ boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.05)' }}
         >
           <div className="flex justify-between items-center border-b border-white/5 pb-4">
             <h3 className="text-sm font-semibold tracking-wider uppercase text-white flex items-center gap-2">
-              <Globe className="w-4 h-4 text-gray-400" />
-              <span>Production Deployment Status</span>
+              <Activity className="w-4 h-4 text-gray-400 animate-pulse" />
+              <span>Global Activity Stream</span>
             </h3>
             <span className="text-[10px] font-bold text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/10 uppercase font-mono">
-              v1.5.0-growth
+              Live Feed
             </span>
           </div>
 
-          <div className="flex flex-col gap-4 text-xs font-mono">
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <div className="flex items-center gap-2 text-gray-400">
-                <GitBranch className="w-3.5 h-3.5" />
-                <span>ACTIVE DEPLOYMENT BRANCH</span>
+          <div className="flex flex-col gap-3.5 overflow-y-auto max-h-[300px] pr-2 no-scrollbar">
+            {activityLogs.length === 0 ? (
+              <div className="py-12 text-center text-xs text-gray-600 uppercase tracking-widest">
+                No activity logged yet.
               </div>
-              <span className="text-white">main</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <div className="flex items-center gap-2 text-gray-400">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" />
-                <span>PIPELINE BUILD STATUS</span>
-              </div>
-              <span className="text-emerald-400 font-semibold">SUCCESS</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b border-white/5">
-              <div className="flex items-center gap-2 text-gray-400">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>SSL CERTIFICATION</span>
-              </div>
-              <span className="text-emerald-400">{getStatusBadge(healthStatus.website)}</span>
-            </div>
-            <div className="flex justify-between items-center py-2">
-              <div className="flex items-center gap-2 text-gray-400">
-                <Activity className="w-3.5 h-3.5" />
-                <span>LAST DEPLOYED TIMESTAMP</span>
-              </div>
-              <span className="text-white">2026-06-14 22:45:00</span>
-            </div>
+            ) : (
+              activityLogs.map((log) => {
+                // Determine icon and color based on activity type or action
+                const type = (log.type || '').toLowerCase();
+                const action = (log.action || '').toLowerCase();
+                
+                let icon = <Activity className="w-3.5 h-3.5 text-gray-400" />;
+
+                if (type.includes('lead') || action.includes('lead') || action.includes('booking') || action.includes('contact')) {
+                  icon = <Users className="w-3.5 h-3.5 text-amber-400" />;
+                } else if (type.includes('proposal') || action.includes('proposal')) {
+                  icon = <Cpu className="w-3.5 h-3.5 text-purple-400" />;
+                } else if (type.includes('client') || action.includes('client')) {
+                  icon = <Building2 className="w-3.5 h-3.5 text-emerald-400" />;
+                } else if (type.includes('project') || action.includes('project')) {
+                  icon = <FolderKanban className="w-3.5 h-3.5 text-blue-400" />;
+                } else if (type.includes('task') || action.includes('task')) {
+                  icon = <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />;
+                } else if (type.includes('invoice') || action.includes('invoice') || action.includes('payment') || type.includes('payment')) {
+                  icon = <CreditCard className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />;
+                }
+
+                const timeStr = log.createdAt?.toDate 
+                  ? log.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : (log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent');
+
+                const dateStr = log.createdAt?.toDate
+                  ? log.createdAt.toDate().toLocaleDateString('en-IN')
+                  : (log.timestamp?.toDate ? log.timestamp.toDate().toLocaleDateString('en-IN') : 'Recent');
+
+                const detailsText = log.description || log.details || '';
+                const titleText = log.title || log.action || 'Event';
+
+                return (
+                  <div key={log.id} className="flex items-start justify-between gap-4 p-2.5 rounded-lg bg-white/[0.01] border border-white/5 hover:bg-white/[0.02] transition duration-150">
+                    <div className="flex gap-3 items-start">
+                      <div className="p-1.5 rounded-md border border-white/10 bg-white/5 flex items-center justify-center mt-0.5">
+                        {icon}
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-semibold text-white uppercase tracking-wider">{titleText}</span>
+                        <p className="text-[11px] text-gray-400 font-light leading-normal normal-case">{detailsText}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0 text-right font-mono text-[9px] text-gray-500">
+                      <span>{timeStr}</span>
+                      <span>{dateStr}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

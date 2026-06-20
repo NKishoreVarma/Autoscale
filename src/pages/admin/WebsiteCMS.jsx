@@ -15,6 +15,7 @@ export default function WebsiteCMS() {
   const [testimonials, setTestimonials] = useState([]);
   const [caseStudies, setCaseStudies] = useState([]);
   const [industries, setIndustries] = useState([]);
+  const [blogs, setBlogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Edit / Form states
@@ -46,6 +47,14 @@ export default function WebsiteCMS() {
     // 5. Subscribe to Industries
     const unsubIndustries = onSnapshot(query(collection(db, 'industries'), orderBy('order', 'asc')), (snap) => {
       setIndustries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    // 6. Subscribe to Blogs
+    const unsubBlogs = onSnapshot(query(collection(db, 'blogs'), orderBy('order', 'asc')), (snap) => {
+      setBlogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, (err) => {
+      console.error("Blogs CMS read error:", err);
       setLoading(false);
     });
 
@@ -55,6 +64,7 @@ export default function WebsiteCMS() {
       unsubTestimonials();
       unsubCaseStudies();
       unsubIndustries();
+      unsubBlogs();
     };
   }, []);
 
@@ -65,11 +75,13 @@ export default function WebsiteCMS() {
     } else if (activeTab === 'faqs') {
       setFormData({ question: '', answer: '', isVisible: true, order: faqs.length });
     } else if (activeTab === 'testimonials') {
-      setFormData({ clientName: '', companyName: '', quote: '', rating: 5, isVisible: true, order: testimonials.length });
+      setFormData({ name: '', clientName: '', company: '', companyName: '', review: '', quote: '', rating: 5, published: true, order: testimonials.length });
     } else if (activeTab === 'caseStudies') {
-      setFormData({ client: '', industry: 'Healthcare', before: '', after: '', result: '', order: caseStudies.length });
+      setFormData({ title: '', clientName: '', client: '', industry: 'Healthcare', problem: '', before: '', solution: '', after: '', result: '', roi: '', published: true, order: caseStudies.length });
     } else if (activeTab === 'industries') {
       setFormData({ title: '', leak: '', metricPrefix: '', metricValue: '', metricSuffix: '', order: industries.length });
+    } else if (activeTab === 'blogs') {
+      setFormData({ title: '', author: 'AutoScale Architect', slug: '', summary: '', content: '', category: 'Systems', published: true, order: blogs.length });
     }
     setShowModal(true);
   };
@@ -103,10 +115,20 @@ export default function WebsiteCMS() {
     const collectionName = activeTab === 'caseStudies' ? 'caseStudies' : activeTab;
     const updates = { ...formData, updatedAt: serverTimestamp() };
 
-    // Format numbers
+    // Format numbers and handle backward compatibility mappings
     if (updates.order !== undefined) updates.order = Number(updates.order) || 0;
     if (updates.rating !== undefined) updates.rating = Number(updates.rating) || 5;
     if (updates.metricValue !== undefined) updates.metricValue = Number(updates.metricValue) || 0;
+
+    if (activeTab === 'testimonials') {
+      updates.clientName = updates.name || updates.clientName || '';
+      updates.companyName = updates.company || updates.companyName || '';
+      updates.quote = updates.review || updates.quote || '';
+    } else if (activeTab === 'caseStudies') {
+      updates.client = updates.clientName || updates.client || '';
+      updates.before = updates.problem || updates.before || '';
+      updates.after = updates.solution || updates.after || '';
+    }
 
     try {
       if (editingItem) {
@@ -183,6 +205,10 @@ export default function WebsiteCMS() {
           <Building className="w-4 h-4" />
           <span>Industries</span>
         </button>
+        <button onClick={() => setActiveTab('blogs')} className={`px-5 py-4 flex items-center gap-2 border-b-2 transition ${activeTab === 'blogs' ? 'border-white text-white font-bold' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+          <Globe className="w-4 h-4" />
+          <span>Blogs</span>
+        </button>
       </div>
 
       {/* Listing Panel */}
@@ -252,21 +278,27 @@ export default function WebsiteCMS() {
                 <tr className="border-b border-white/5 text-[10px] font-bold tracking-widest text-gray-400 uppercase bg-white/[0.02]">
                   <th className="px-6 py-4">Client Name</th>
                   <th className="px-6 py-4">Company</th>
-                  <th className="px-6 py-4">Quote</th>
+                  <th className="px-6 py-4">Review</th>
                   <th className="px-6 py-4">Rating</th>
+                  <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-xs font-light">
                 {testimonials.map(t => (
                   <tr key={t.id} className="hover:bg-white/[0.01]">
-                    <td className="px-6 py-4 font-semibold text-white">{t.clientName}</td>
-                    <td className="px-6 py-4 text-gray-300">{t.companyName}</td>
-                    <td className="px-6 py-4 text-gray-400 max-w-sm normal-case truncate">"{t.quote}"</td>
+                    <td className="px-6 py-4 font-semibold text-white">{t.name || t.clientName}</td>
+                    <td className="px-6 py-4 text-gray-300">{t.company || t.companyName}</td>
+                    <td className="px-6 py-4 text-gray-400 max-w-sm normal-case truncate">"{t.review || t.quote}"</td>
                     <td className="px-6 py-4 font-mono text-amber-400">{t.rating} ★</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider ${t.published !== false ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-500/20' : 'bg-white/5 text-gray-400 border border-white/10'}`}>
+                        {t.published !== false ? 'Published' : 'Draft'}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                       <button onClick={() => openEditModal(t)} className="p-1.5 border border-white/10 rounded hover:bg-white/5 text-gray-400 hover:text-white transition"><Edit2 className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => handleDelete(t.id, t.clientName)} className="p-1.5 border border-red-500/10 rounded hover:bg-red-950/20 text-red-400 transition"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => handleDelete(t.id, t.name || t.clientName)} className="p-1.5 border border-red-500/10 rounded hover:bg-red-950/20 text-red-400 transition"><Trash2 className="w-3.5 h-3.5" /></button>
                     </td>
                   </tr>
                 ))}
@@ -280,25 +312,29 @@ export default function WebsiteCMS() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-white/5 text-[10px] font-bold tracking-widest text-gray-400 uppercase bg-white/[0.02]">
+                  <th className="px-6 py-4">Title</th>
                   <th className="px-6 py-4">Client / Org</th>
                   <th className="px-6 py-4">Sector</th>
-                  <th className="px-6 py-4">Manual (Before)</th>
-                  <th className="px-6 py-4">Automated (After)</th>
-                  <th className="px-6 py-4">Expected Impact</th>
+                  <th className="px-6 py-4">ROI</th>
+                  <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-xs font-light">
                 {caseStudies.map(cs => (
                   <tr key={cs.id} className="hover:bg-white/[0.01]">
-                    <td className="px-6 py-4 font-semibold text-white uppercase">{cs.client}</td>
+                    <td className="px-6 py-4 font-semibold text-white uppercase">{cs.title || 'Untitled'}</td>
+                    <td className="px-6 py-4">{cs.clientName || cs.client}</td>
                     <td className="px-6 py-4">{cs.industry}</td>
-                    <td className="px-6 py-4 text-gray-400 normal-case">{cs.before}</td>
-                    <td className="px-6 py-4 text-gray-300 normal-case">{cs.after}</td>
-                    <td className="px-6 py-4 text-emerald-400 font-bold normal-case">{cs.result}</td>
+                    <td className="px-6 py-4 text-emerald-400 font-bold normal-case">{cs.roi || cs.result}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider ${cs.published !== false ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-500/20' : 'bg-white/5 text-gray-400 border border-white/10'}`}>
+                        {cs.published !== false ? 'Published' : 'Draft'}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                       <button onClick={() => openEditModal(cs)} className="p-1.5 border border-white/10 rounded hover:bg-white/5 text-gray-400 hover:text-white transition"><Edit2 className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => handleDelete(cs.id, cs.client)} className="p-1.5 border border-red-500/10 rounded hover:bg-red-950/20 text-red-400 transition"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => handleDelete(cs.id, cs.title || cs.clientName || cs.client)} className="p-1.5 border border-red-500/10 rounded hover:bg-red-950/20 text-red-400 transition"><Trash2 className="w-3.5 h-3.5" /></button>
                     </td>
                   </tr>
                 ))}
@@ -327,6 +363,42 @@ export default function WebsiteCMS() {
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                       <button onClick={() => openEditModal(ind)} className="p-1.5 border border-white/10 rounded hover:bg-white/5 text-gray-400 hover:text-white transition"><Edit2 className="w-3.5 h-3.5" /></button>
                       <button onClick={() => handleDelete(ind.id, ind.title)} className="p-1.5 border border-red-500/10 rounded hover:bg-red-950/20 text-red-400 transition"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeTab === 'blogs' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-white/5 text-[10px] font-bold tracking-widest text-gray-400 uppercase bg-white/[0.02]">
+                  <th className="px-6 py-4">Title</th>
+                  <th className="px-6 py-4">Author</th>
+                  <th className="px-6 py-4">Category</th>
+                  <th className="px-6 py-4">Slug</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 text-xs font-light">
+                {blogs.map(b => (
+                  <tr key={b.id} className="hover:bg-white/[0.01]">
+                    <td className="px-6 py-4 font-semibold text-white uppercase">{b.title || 'Untitled'}</td>
+                    <td className="px-6 py-4">{b.author}</td>
+                    <td className="px-6 py-4">{b.category}</td>
+                    <td className="px-6 py-4 font-mono text-gray-400">{b.slug}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider ${b.published !== false ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-500/20' : 'bg-white/5 text-gray-400 border border-white/10'}`}>
+                        {b.published !== false ? 'Published' : 'Draft'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                      <button onClick={() => openEditModal(b)} className="p-1.5 border border-white/10 rounded hover:bg-white/5 text-gray-400 hover:text-white transition"><Edit2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => handleDelete(b.id, b.title)} className="p-1.5 border border-red-500/10 rounded hover:bg-red-950/20 text-red-400 transition"><Trash2 className="w-3.5 h-3.5" /></button>
                     </td>
                   </tr>
                 ))}
@@ -405,25 +477,31 @@ export default function WebsiteCMS() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-[9px] font-bold text-gray-500 block mb-1">Client Name</label>
-                      <input type="text" required value={formData.clientName || ''} onChange={e => setFormData({ ...formData, clientName: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                      <input type="text" required value={formData.name || formData.clientName || ''} onChange={e => setFormData({ ...formData, name: e.target.value, clientName: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
                     </div>
                     <div>
                       <label className="text-[9px] font-bold text-gray-500 block mb-1">Company</label>
-                      <input type="text" required value={formData.companyName || ''} onChange={e => setFormData({ ...formData, companyName: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                      <input type="text" required value={formData.company || formData.companyName || ''} onChange={e => setFormData({ ...formData, company: e.target.value, companyName: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
                     </div>
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-gray-500 block mb-1">Quote</label>
-                    <textarea required rows={3} value={formData.quote || ''} onChange={e => setFormData({ ...formData, quote: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case resize-none" />
+                    <label className="text-[9px] font-bold text-gray-500 block mb-1">Review / Quote</label>
+                    <textarea required rows={3} value={formData.review || formData.quote || ''} onChange={e => setFormData({ ...formData, review: e.target.value, quote: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case resize-none" />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div>
                       <label className="text-[9px] font-bold text-gray-500 block mb-1">Rating (1-5)</label>
-                      <input type="number" min="1" max="5" required value={formData.rating || 5} onChange={e => setFormData({ ...formData, rating: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                      <input type="number" min="1" max="5" required value={formData.rating || 5} onChange={e => setFormData({ ...formData, rating: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
                     </div>
                     <div>
                       <label className="text-[9px] font-bold text-gray-500 block mb-1">Sort Order</label>
-                      <input type="number" required value={formData.order === undefined ? '' : formData.order} onChange={e => setFormData({ ...formData, order: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                      <input type="number" required value={formData.order === undefined ? '' : formData.order} onChange={e => setFormData({ ...formData, order: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                    </div>
+                    <div className="flex items-center pt-4">
+                      <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 cursor-pointer uppercase select-none">
+                        <input type="checkbox" checked={formData.published !== false} onChange={e => setFormData({ ...formData, published: e.target.checked })} className="rounded bg-black border-white/10 text-[#5E0ED7] focus:ring-0" />
+                        <span>Published</span>
+                      </label>
                     </div>
                   </div>
                 </>
@@ -433,31 +511,49 @@ export default function WebsiteCMS() {
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Client / Org</label>
-                      <input type="text" required value={formData.client || ''} onChange={e => setFormData({ ...formData, client: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Case Study Title</label>
+                      <input type="text" required value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
                     </div>
                     <div>
-                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Sector / Industry</label>
-                      <input type="text" required value={formData.industry || ''} onChange={e => setFormData({ ...formData, industry: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Client Name</label>
+                      <input type="text" required value={formData.clientName || formData.client || ''} onChange={e => setFormData({ ...formData, clientName: e.target.value, client: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Before (Manual)</label>
-                      <input type="text" required value={formData.before || ''} onChange={e => setFormData({ ...formData, before: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Sector / Industry</label>
+                      <input type="text" required value={formData.industry || ''} onChange={e => setFormData({ ...formData, industry: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
                     </div>
                     <div>
-                      <label className="text-[9px] font-bold text-gray-500 block mb-1">After (Automated)</label>
-                      <input type="text" required value={formData.after || ''} onChange={e => setFormData({ ...formData, after: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Expected Result (Metric)</label>
+                      <input type="text" required value={formData.result || ''} onChange={e => setFormData({ ...formData, result: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
                     </div>
                   </div>
-                  <div>
-                    <label className="text-[9px] font-bold text-gray-500 block mb-1">Expected Result / Impact</label>
-                    <input type="text" required value={formData.result || ''} onChange={e => setFormData({ ...formData, result: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Problem / Challenge Description</label>
+                      <textarea required rows={2} value={formData.problem || formData.before || ''} onChange={e => setFormData({ ...formData, problem: e.target.value, before: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case resize-none" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Solution / Automation Setup</label>
+                      <textarea required rows={2} value={formData.solution || formData.after || ''} onChange={e => setFormData({ ...formData, solution: e.target.value, after: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case resize-none" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[9px] font-bold text-gray-500 block mb-1">Sort Order</label>
-                    <input type="number" required value={formData.order === undefined ? '' : formData.order} onChange={e => setFormData({ ...formData, order: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">ROI Yield (E.g. +35% bookings)</label>
+                      <input type="text" required value={formData.roi || ''} onChange={e => setFormData({ ...formData, roi: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Sort Order</label>
+                      <input type="number" required value={formData.order === undefined ? '' : formData.order} onChange={e => setFormData({ ...formData, order: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                    </div>
+                    <div className="flex items-center pt-4">
+                      <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 cursor-pointer uppercase select-none">
+                        <input type="checkbox" checked={formData.published !== false} onChange={e => setFormData({ ...formData, published: e.target.checked })} className="rounded bg-black border-white/10 text-[#5E0ED7] focus:ring-0" />
+                        <span>Published</span>
+                      </label>
+                    </div>
                   </div>
                 </>
               )}
@@ -489,6 +585,55 @@ export default function WebsiteCMS() {
                   <div>
                     <label className="text-[9px] font-bold text-gray-500 block mb-1">Sort Order</label>
                     <input type="number" required value={formData.order === undefined ? '' : formData.order} onChange={e => setFormData({ ...formData, order: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                  </div>
+                </>
+              )}
+
+              {activeTab === 'blogs' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Blog Title</label>
+                      <input type="text" required value={formData.title || ''} onChange={e => {
+                        const title = e.target.value;
+                        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+                        setFormData({ ...formData, title, slug });
+                      }} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Author</label>
+                      <input type="text" required value={formData.author || ''} onChange={e => setFormData({ ...formData, author: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Slug (Auto generated)</label>
+                      <input type="text" required value={formData.slug || ''} onChange={e => setFormData({ ...formData, slug: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Category</label>
+                      <input type="text" required value={formData.category || ''} onChange={e => setFormData({ ...formData, category: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold text-gray-500 block mb-1">Summary / SEO Description</label>
+                    <input type="text" required value={formData.summary || ''} onChange={e => setFormData({ ...formData, summary: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold text-gray-500 block mb-1">Content (HTML formatted)</label>
+                    <textarea required rows={8} value={formData.content || ''} onChange={e => setFormData({ ...formData, content: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none normal-case resize-none font-mono" placeholder="<p>Write content here...</p>" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-500 block mb-1">Sort Order</label>
+                      <input type="number" required value={formData.order === undefined ? '' : formData.order} onChange={e => setFormData({ ...formData, order: e.target.value })} className="w-full bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none" />
+                    </div>
+                    <div className="flex items-center pt-4 col-span-2">
+                      <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 cursor-pointer uppercase select-none">
+                        <input type="checkbox" checked={formData.published !== false} onChange={e => setFormData({ ...formData, published: e.target.checked })} className="rounded bg-black border-white/10 text-[#5E0ED7] focus:ring-0" />
+                        <span>Published / Public visibility</span>
+                      </label>
+                    </div>
                   </div>
                 </>
               )}

@@ -1,11 +1,14 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, limit } from 'firebase/firestore';
 import { db, storage } from '../../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { emailService } from '../../utils/emailService';
+import { whatsappService } from '../../utils/whatsappService';
 import {
-  Search, X, Plus, FolderKanban, User, Calendar, Briefcase,
+Search, X, Plus, FolderKanban, User, Calendar, Briefcase,
   AlertTriangle, Play, CheckCircle2, Eye, Trash2, HelpCircle,
   Paperclip, Upload, MessageSquare, Check, DollarSign, Download, ClipboardList, FileText
 } from 'lucide-react';
@@ -111,7 +114,7 @@ export default function Projects() {
     );
 
     const unsubTeam = onSnapshot(
-      query(collection(db, 'teamMembers'), orderBy('name', 'asc')),
+      query(collection(db, 'team'), orderBy('name', 'asc')),
       (snapshot) => {
         setTeamMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }
@@ -247,6 +250,21 @@ export default function Projects() {
 
       await logTimelineEvent(projectId, newStatus, stageDesc);
 
+      // Find client and dispatch real-world notifications
+      const client = clients.find(c => c.id === target?.clientId);
+      if (client && target) {
+        try {
+          if (newStatus === 'Completed') {
+            await emailService.sendProjectUpdateEmail(target, client, stageDesc);
+            await whatsappService.sendProjectCompleted(target, client);
+          } else {
+            await emailService.sendProjectUpdateEmail(target, client, stageDesc);
+          }
+        } catch (dispatchErr) {
+          console.error('[Projects] Failed to send project update notifications:', dispatchErr);
+        }
+      }
+
       // Trigger notification if project is completed/live
       if (newStatus === 'Live' || newStatus === 'Completed') {
         await addDoc(collection(db, 'notifications'), {
@@ -305,7 +323,7 @@ export default function Projects() {
 
   const handleDeleteProject = async (projectId) => {
     if (userRole !== 'super_admin') {
-      alert('Access Denied: Only Super Admin can delete records.');
+      triggerToast('Access Denied: Only Super Admin can delete records.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this project?')) return;
@@ -414,24 +432,8 @@ export default function Projects() {
       await logTimelineEvent(selectedProject.id, selectedProject.status || 'Planning', `File attachment uploaded: "${file.name}"`);
 
     } catch (err) {
-      console.warn('Storage upload error, applying database fallback:', err.message);
-      try {
-        const dummyURL = `https://firebasestorage.googleapis.com/v0/b/autoscale-prod-db6ea.appspot.com/o/mock%2F${encodeURIComponent(file.name)}?alt=media`;
-        await addDoc(collection(db, 'projectFiles'), {
-          projectId: selectedProject.id,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          downloadURL: dummyURL,
-          path: storagePath,
-          uploadedBy: authUser?.email || 'Admin',
-          uploadedAt: serverTimestamp(),
-        });
-        await logTimelineEvent(selectedProject.id, selectedProject.status || 'Planning', `File attachment uploaded (simulated): "${file.name}"`);
-      } catch (dbErr) {
-        console.error('Fallback failed:', dbErr);
-        setUploadError('Failed to upload file. Check storage configuration.');
-      }
+      console.error('Firebase Storage upload error:', err);
+      setUploadError(`Failed to upload file: ${err.message || 'Check storage bucket and security rules.'}`);
     } finally {
       setUploading(false);
     }

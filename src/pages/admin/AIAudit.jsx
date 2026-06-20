@@ -1,16 +1,20 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
+import { useNavigate } from 'react-router-dom';
+import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { generateWithGemini } from '../../utils/gemini';
-import { Cpu, X, Plus, Trash2, ArrowUpRight, CheckCircle, Clock, Percent, ShieldAlert, Sparkles, Building, Globe, Zap, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Cpu, X, Plus, Trash2, ArrowUpRight, CheckCircle, Clock, Percent, ShieldAlert, Sparkles, Building, Globe, Zap, AlertTriangle, ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
+import { pdfGenerator } from '../../utils/pdfGenerator';
 
 const formatINR = (val) => {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val || 0);
 };
 
 export default function AIAudit() {
+  const navigate = useNavigate();
   const { user: authUser, userRole } = useAuth();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +124,17 @@ export default function AIAudit() {
       setGenProgress(100);
       clearInterval(progressInterval);
 
+      // Auto generate and upload Audit Report PDF
+      try {
+        const pdfUrl = await pdfGenerator.generateAndUploadAudit(docRef.id, payload);
+        if (pdfUrl) {
+          await updateDoc(doc(db, 'auditReports', docRef.id), { pdfUrl });
+          payload.pdfUrl = pdfUrl;
+        }
+      } catch (pdfErr) {
+        console.error('[AIAudit] Audit PDF generation failed:', pdfErr);
+      }
+
       // Create notification
       await addDoc(collection(db, 'notifications'), {
         type: 'new_lead',
@@ -149,7 +164,7 @@ export default function AIAudit() {
 
     } catch (err) {
       console.error("Error generating AI Audit:", err);
-      alert("AI Audit generation failed. Please try again.");
+      triggerToast('AI Audit generation failed. Please try again.', 'error');
       setGenerating(false);
       clearInterval(progressInterval);
     }
@@ -157,7 +172,7 @@ export default function AIAudit() {
 
   const handleDeleteAudit = async (id, name) => {
     if (userRole !== 'super_admin') {
-      alert("Clearance Denied: Only Super Admin can delete audit records.");
+      triggerToast('Clearance Denied: Only Super Admin can delete audit records.', 'error');
       return;
     }
     if (!window.confirm(`Are you sure you want to delete the audit report for ${name}?`)) return;
@@ -261,15 +276,34 @@ export default function AIAudit() {
                     <ArrowUpRight className="w-3 h-3" />
                   </a>
                 </div>
-                {userRole === 'super_admin' && (
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleDeleteAudit(selectedReport.id, selectedReport.businessName)}
-                    className="p-2 border border-red-500/20 text-red-400 hover:bg-red-950/20 hover:text-red-300 rounded-lg transition"
-                    title="Delete Audit"
+                    onClick={() => {
+                      navigate('/admin/proposals', { 
+                        state: { 
+                          auditId: selectedReport.id,
+                          company: selectedReport.businessName,
+                          industry: selectedReport.industry,
+                          findings: selectedReport.findings
+                        } 
+                      });
+                    }}
+                    className="border border-[#5E0ED7]/20 hover:border-[#5E0ED7]/50 bg-[#5E0ED7]/10 hover:bg-[#5E0ED7]/20 text-white text-xs font-semibold tracking-wider rounded-lg uppercase px-3 py-2 flex items-center gap-1.5 transition"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Create Proposal</span>
                   </button>
-                )}
+
+                  {userRole === 'super_admin' && (
+                    <button
+                      onClick={() => handleDeleteAudit(selectedReport.id, selectedReport.businessName)}
+                      className="p-2 border border-red-500/20 text-red-400 hover:bg-red-950/20 hover:text-red-300 rounded-lg transition"
+                      title="Delete Audit"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* ROI Potential cards */}

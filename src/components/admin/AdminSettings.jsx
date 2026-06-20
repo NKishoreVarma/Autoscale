@@ -4,8 +4,10 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { logAuditAction } from '../../utils/auditLogger';
 import {
-  Shield, Bell, CheckCircle, Lock, Building, Globe, Mail, PhoneCall, Cpu, Save, RefreshCw
+  Shield, Bell, CheckCircle, Lock, Building, Globe, Mail, PhoneCall, Cpu, Save, RefreshCw, Calendar
 } from 'lucide-react';
+
+import { triggerToast } from '../../utils/errorHandler';
 
 import { appConfig } from '../../config/appConfig';
 
@@ -14,6 +16,7 @@ const TABS = [
   { id: 'website', label: 'Website Settings', icon: Globe },
   { id: 'smtp', label: 'SMTP Email', icon: Mail },
   { id: 'twilio', label: 'Twilio Gateway', icon: PhoneCall },
+  { id: 'google_calendar', label: 'Google Calendar', icon: Calendar },
   { id: 'firebase', label: 'Firebase Config', icon: Cpu }
 ];
 
@@ -38,6 +41,10 @@ export default function AdminSettings() {
     twilioSid: 'ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
     twilioToken: '••••••••••••••••••••••••••••••••',
     twilioPhone: '+14155552671',
+    googleClientId: '',
+    googleClientSecret: '',
+    googleRefreshToken: '',
+    googleCalendarId: 'primary',
     firebaseApiKey: appConfig.firebase.apiKey || 'AIzaSyA...',
     firebaseProjectId: appConfig.firebase.projectId || 'autoscale-prod',
     firebaseAppId: appConfig.firebase.appId || '1:123456:web:abcd'
@@ -59,6 +66,7 @@ export default function AdminSettings() {
         const websiteSnap = await getDoc(doc(db, 'settings', 'website'));
         const smtpSnap = await getDoc(doc(db, 'settings', 'smtp'));
         const twilioSnap = await getDoc(doc(db, 'settings', 'twilio'));
+        const calSnap = await getDoc(doc(db, 'settings', 'google_calendar'));
 
         setFormData(prev => {
           const newFormData = { ...prev };
@@ -90,6 +98,14 @@ export default function AdminSettings() {
             newFormData.twilioSid = data.accountSid || newFormData.twilioSid;
             newFormData.twilioToken = data.twilioToken || newFormData.twilioToken;
             newFormData.twilioPhone = data.phoneNumber || newFormData.twilioPhone;
+          }
+
+          if (calSnap.exists()) {
+            const data = calSnap.data();
+            newFormData.googleClientId = data.clientId || newFormData.googleClientId;
+            newFormData.googleClientSecret = data.clientSecret || newFormData.googleClientSecret;
+            newFormData.googleRefreshToken = data.refreshToken || newFormData.googleRefreshToken;
+            newFormData.googleCalendarId = data.calendarId || newFormData.googleCalendarId;
           }
 
           return newFormData;
@@ -166,6 +182,16 @@ export default function AdminSettings() {
           updatedAt: serverTimestamp()
         };
         auditMsg = `Updated Twilio gateway with Account SID ${formData.twilioSid.substring(0, 8)}...`;
+      } else if (activeTab === 'google_calendar') {
+        docRef = doc(db, 'settings', 'google_calendar');
+        dataToSave = {
+          clientId: formData.googleClientId,
+          clientSecret: formData.googleClientSecret,
+          refreshToken: formData.googleRefreshToken,
+          calendarId: formData.googleCalendarId,
+          updatedAt: serverTimestamp()
+        };
+        auditMsg = `Updated Google Calendar settings for ID "${formData.googleCalendarId}"`;
       } else {
         setSaving(false);
         return;
@@ -186,7 +212,7 @@ export default function AdminSettings() {
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       console.error('Error saving settings:', err);
-      alert('Failed to save settings. Please verify Firestore security rules.');
+      triggerToast('Failed to save settings. Please verify Firestore security rules.', 'error');
     } finally {
       setSaving(false);
     }
@@ -497,7 +523,65 @@ export default function AdminSettings() {
                 </div>
               )}
 
-              {/* Tab 5: Firebase settings */}
+              {/* Tab 5: Google Calendar settings */}
+              {activeTab === 'google_calendar' && (
+                <div 
+                  className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-5"
+                  style={{ boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.05)' }}
+                >
+                  <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                    <Calendar className="w-5 h-5 text-gray-400" />
+                    <h3 className="text-sm font-semibold tracking-wider uppercase text-white">
+                      Google Calendar OAuth Configuration
+                    </h3>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Google Client ID</label>
+                      <input
+                        type="text"
+                        name="googleClientId"
+                        value={formData.googleClientId}
+                        onChange={handleChange}
+                        className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white normal-case font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Google Client Secret</label>
+                      <input
+                        type="password"
+                        name="googleClientSecret"
+                        value={formData.googleClientSecret}
+                        onChange={handleChange}
+                        className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white normal-case font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Google Refresh Token</label>
+                      <input
+                        type="password"
+                        name="googleRefreshToken"
+                        value={formData.googleRefreshToken}
+                        onChange={handleChange}
+                        className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white normal-case font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[9px] font-bold tracking-widest text-gray-500 uppercase">Calendar ID</label>
+                      <input
+                        type="text"
+                        name="googleCalendarId"
+                        value={formData.googleCalendarId}
+                        onChange={handleChange}
+                        className="bg-black border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white normal-case font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 6: Firebase settings */}
               {activeTab === 'firebase' && (
                 <div 
                   className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-5"

@@ -141,10 +141,10 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // Analytics: Viewers read, Viewers update (for dashboard sync logic)
+    // Analytics: Public read and write for visitor counts and conversion tracking
     match /analytics/{docId} {
-      allow read: if isViewer();
-      allow write: if isViewer();
+      allow read: if true;
+      allow write: if true;
     }
 
     // Audit Logs: Immutable log records. Admins write logs, Super Admin reads, no deletions
@@ -172,7 +172,8 @@ service cloud.firestore {
 
     match /meetings/{meetingId} {
       allow read: if isViewer();
-      allow create, update: if isManager();
+      allow create: if true; // Public call booking
+      allow update: if isManager();
       allow delete: if isSuperAdmin();
     }
 
@@ -184,6 +185,12 @@ service cloud.firestore {
 
     // Team Members Collection: Viewers read, Super Admin manage
     match /teamMembers/{memberId} {
+      allow read: if isViewer();
+      allow write: if isSuperAdmin();
+    }
+
+    // Team Collection: Viewers read, Super Admin manage
+    match /team/{memberId} {
       allow read: if isViewer();
       allow write: if isSuperAdmin();
     }
@@ -203,6 +210,13 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Tasks Collection: Viewers read, Managers write, Super Admin delete. Clients read/write their own project's tasks.
+    match /tasks/{taskId} {
+      allow read: if isViewer() || (isClient() && resource.data.projectId != null && clientOwnsProject(resource.data.projectId));
+      allow create, update: if isManager() || (isClient() && request.resource.data.projectId != null && clientOwnsProject(request.resource.data.projectId));
+      allow delete: if isSuperAdmin();
+    }
+
     // Project Timelines Collection: Viewers read, Admins/Managers write. Clients read/write events.
     match /projectTimelines/{timelineId} {
       allow read: if isViewer() || (isClient() && resource.data.projectId != null && clientOwnsProject(resource.data.projectId));
@@ -211,10 +225,11 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // AI Audit Reports Collection: Viewers read, Managers write, Super Admin delete
+    // AI Audit Reports Collection: Public read and create, Managers write, Super Admin delete
     match /auditReports/{reportId} {
-      allow read: if isViewer();
-      allow create, update: if isManager();
+      allow read: if true; // Allowed for public review of generated audits
+      allow create: if true; // Public generation from landing page
+      allow update: if isManager();
       allow delete: if isSuperAdmin();
     }
 
@@ -243,6 +258,21 @@ service cloud.firestore {
       allow create: if isManager();
       allow delete: if isSuperAdmin();
     }
+    match /email_logs/{logId} {
+      allow read: if isViewer();
+      allow create: if true;
+      allow delete: if isSuperAdmin();
+    }
+    match /whatsapp_logs/{logId} {
+      allow read: if isViewer();
+      allow create: if true;
+      allow delete: if isSuperAdmin();
+    }
+    match /communications/{commId} {
+      allow read: if isViewer();
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
 
     // Dynamic website elements: Public read, Managers manage, Super Admin delete
     match /faqs/{faqId} {
@@ -263,6 +293,20 @@ service cloud.firestore {
     match /industries/{indId} {
       allow read: if true;
       allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Dynamic blog articles: Public read, Managers manage, Super Admin delete
+    match /blogs/{blogId} {
+      allow read: if true;
+      allow create, update: if isManager();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Lead magnet downloads: Public create, Viewers read, Super Admin delete
+    match /lead_magnet_downloads/{downloadId} {
+      allow read: if isViewer();
+      allow create: if true;
       allow delete: if isSuperAdmin();
     }
   }

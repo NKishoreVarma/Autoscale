@@ -1,10 +1,11 @@
+import { triggerToast } from '../../utils/errorHandler';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, addDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { logAuditAction } from '../../utils/auditLogger';
 import {
-  Search, X, Inbox, Mail, Phone, Calendar, Trash2, MessageSquare, Building, Check
+Search, X, Inbox, Mail, Phone, Calendar, Trash2, MessageSquare, Building, Check
 } from 'lucide-react';
 
 const STATUSES = ['New', 'Contacted', 'Ignored', 'Archived'];
@@ -36,9 +37,15 @@ export default function ContactForms() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'contactForms'), orderBy('createdAt', 'desc'), limit(200)),
+      query(collection(db, 'leads'), where('leadSource', '==', 'Contact Form')),
       (snapshot) => {
-        setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        list.sort((a, b) => {
+          const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+          const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+          return bTime - aTime;
+        });
+        setSubmissions(list);
         setLoading(false);
       },
       (err) => {
@@ -51,14 +58,15 @@ export default function ContactForms() {
 
   const handleUpdateStatus = async (subId, newStatus) => {
     try {
-      await updateDoc(doc(db, 'contactForms', subId), { status: newStatus });
+      await updateDoc(doc(db, 'leads', subId), { status: newStatus });
       
       const target = submissions.find(s => s.id === subId);
       await logAuditAction(
         userProfile?.email || 'admin@autoscale.systems',
         userRole || 'admin',
         `Updated Contact Form Status`,
-        'contactForms',
+        'leads',
+        subId,
         `Changed status of submission from ${target?.name} to ${newStatus}`
       );
 
@@ -72,19 +80,20 @@ export default function ContactForms() {
 
   const handleDeleteSub = async (subId) => {
     if (!isSuperAdmin) {
-      alert('Access Denied: Only Super Admin can delete records.');
+      triggerToast('Access Denied: Only Super Admin can delete records.', 'error');
       return;
     }
     if (!window.confirm('Are you sure you want to delete this form submission?')) return;
     try {
       const target = submissions.find(s => s.id === subId);
-      await deleteDoc(doc(db, 'contactForms', subId));
+      await deleteDoc(doc(db, 'leads', subId));
       
       await logAuditAction(
         userProfile?.email || 'super_admin@autoscale.systems',
         userRole || 'super_admin',
         `Deleted Contact Form Submission`,
-        'contactForms',
+        'leads',
+        subId,
         `Deleted contact submission record from ${target?.name || 'Sender'}`
       );
 
@@ -98,38 +107,11 @@ export default function ContactForms() {
 
   const handleConvertToLead = async (sub) => {
     try {
-      // Add record to leads collection
-      await addDoc(collection(db, 'leads'), {
-        name: sub.name || '',
-        email: sub.email || '',
-        phone: sub.phone || '',
-        company: sub.company || '',
-        industry: 'Other',
-        service: sub.selectedService || 'Custom System',
-        message: sub.message || '',
-        status: 'New',
-        createdAt: serverTimestamp()
-      });
-
-      // Update contactForm status to Contacted/Converted
+      // It is already a lead in the unified collection! Just mark as contacted
       await handleUpdateStatus(sub.id, 'Contacted');
-      
-      await logAuditAction(
-        userProfile?.email || 'admin@autoscale.systems',
-        userRole || 'admin',
-        `Converted Contact Form to Lead`,
-        'leads',
-        `Promoted contact submission from ${sub.name} to Leads collection`
-      );
-
-      // Update local state flag
-      if (selectedSub && selectedSub.id === sub.id) {
-        setSelectedSub(prev => ({ ...prev, convertedToLead: true, status: 'Contacted' }));
-      }
-
-      alert('Submission successfully promoted to Active Lead pipeline!');
+      triggerToast('Submission status updated to Contacted!', 'info');
     } catch (err) {
-      console.error('Error promoting submission to lead:', err);
+      console.error('Error updating submission:', err);
     }
   };
 
