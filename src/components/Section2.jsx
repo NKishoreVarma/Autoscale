@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { 
   MessageSquare, 
   PhoneCall, 
@@ -34,9 +33,11 @@ export default function Section2() {
       
       {/* Soft background aura glow */}
       <div 
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 pointer-events-none w-[600px] h-[600px] rounded-full filter blur-[150px] opacity-[0.03]"
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 pointer-events-none w-[500px] h-[500px] rounded-full filter blur-[35px] opacity-[0.05]"
         style={{
-          background: 'radial-gradient(circle, #5E0ED7 0%, #7C3AED 70%, transparent 100%)'
+          background: 'radial-gradient(circle, #5E0ED7 0%, #7C3AED 40%, transparent 70%)',
+          transform: 'translate(-50%, -50%) translateZ(0)',
+          willChange: 'transform'
         }}
       />
 
@@ -66,16 +67,8 @@ export default function Section2() {
           {/* SVG Orbit Track Rings */}
           <div className="absolute w-[600px] h-[600px] border border-white/5 rounded-full pointer-events-none z-0" />
           
-          {/* Main rotating orbit ring */}
-          <motion.div
-            className="absolute w-[600px] h-[600px] rounded-full z-10"
-            animate={{ rotate: 360 }}
-            transition={{
-              duration: 40,
-              repeat: Infinity,
-              ease: "linear"
-            }}
-          >
+          {/* Main rotating orbit ring (GPU CSS animated) */}
+          <div className="absolute w-[600px] h-[600px] rounded-full z-10 orbit-ring-animated">
             {SERVICES.map((service, idx) => {
               const angle = (idx * 360) / SERVICES.length;
               const Icon = service.icon;
@@ -84,20 +77,11 @@ export default function Section2() {
                   key={idx}
                   className="absolute top-1/2 left-1/2"
                   style={{
-                    transform: `translate(-50%, -50%) rotate(${angle}deg) translate(300px)`,
+                    transform: `translate(-50%, -50%) rotate(${angle}deg) translate(300px) rotate(-${angle}deg)`,
                   }}
                 >
-                  {/* Counter-rotation to keep the cards perfectly horizontal and readable */}
-                  <motion.div
-                    animate={{ rotate: -360 - angle }}
-                    initial={{ rotate: -angle }}
-                    transition={{
-                      duration: 40,
-                      repeat: Infinity,
-                      ease: "linear"
-                    }}
-                    className="pointer-events-auto"
-                  >
+                  {/* GPU CSS counter-rotation keeps cards horizontal */}
+                  <div className="pointer-events-auto orbit-card-counter-animated">
                     <div 
                       className="service-orbit-card cursor-target cursor-pointer group"
                       onClick={() => handleOpenModal(service.title)}
@@ -105,11 +89,11 @@ export default function Section2() {
                       <Icon className="w-[18px] h-[18px] text-gray-400 group-hover:text-white transition-colors duration-300" />
                       <span className="whitespace-nowrap">{service.title}</span>
                     </div>
-                  </motion.div>
+                  </div>
                 </div>
               );
             })}
-          </motion.div>
+          </div>
         </div>
 
       </div>

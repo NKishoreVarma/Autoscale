@@ -260,7 +260,10 @@ export default function AIAudit() {
           {selectedReport ? (
             <div className="p-6 md:p-8 rounded-xl border border-white/5 bg-white/[0.01] space-y-8 relative overflow-hidden">
               {/* Radial Purple Glow Background */}
-              <div className="absolute top-0 right-0 w-80 h-80 bg-[#5E0ED7]/5 rounded-full pointer-events-none blur-[80px]" />
+              <div 
+                className="absolute top-0 right-0 w-80 h-80 rounded-full pointer-events-none blur-[25px] opacity-40" 
+                style={{ background: 'radial-gradient(circle, rgba(94, 14, 215, 0.15) 0%, transparent 70%)', transform: 'translateZ(0)' }}
+              />
 
               {/* View Header */}
               <div className="flex justify-between items-start border-b border-white/5 pb-6">

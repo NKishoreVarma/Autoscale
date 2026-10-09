@@ -1,4 +1,18 @@
 /* TargetCursor.css */
+@keyframes target-cursor-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.target-cursor-spin-active {
+  animation: target-cursor-spin 3s linear infinite;
+  will-change: transform;
+}
+
 @media (min-width: 1024px) {
   .cursor-target {
     cursor: none !important;

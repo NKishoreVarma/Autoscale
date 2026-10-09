@@ -1,17 +1,15 @@
-import React, { useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useMemo } from "react";
 import gsap from "gsap";
 import "./TargetCursor.css";
 
 const TargetCursor = ({
   targetSelector = ".cursor-target",
-  spinDuration = 2,
   hideDefaultCursor = true,
   snapDuration = 0.18,
-  tolerancePx = 4,
 }) => {
   const cursorRef = useRef(null);
+  const rotWrapperRef = useRef(null);
   const cornersRef = useRef(null);
-  const spinTl = useRef(null);
   const dotRef = useRef(null);
 
   const centerRef = useRef({ x: 0, y: 0 });
@@ -26,40 +24,38 @@ const TargetCursor = ({
     []
   );
 
-  const moveCursor = useCallback((x, y, fast = false) => {
-    if (!cursorRef.current) return;
-    gsap.to(cursorRef.current, {
-      x,
-      y,
-      duration: fast ? 0.08 : 0.12,
-      ease: "power3.out",
-    });
-  }, []);
-
   useEffect(() => {
+    // Only run on non-touch devices with fine pointers
+    if (typeof window === "undefined" || window.matchMedia("(pointer: coarse)").matches) {
+      return;
+    }
+
     if (!cursorRef.current) return;
 
     const originalCursor = document.body.style.cursor;
-    if (hideDefaultCursor) document.body.style.cursor = "none";
+    if (hideDefaultCursor && window.innerWidth >= 1024) {
+      document.body.style.cursor = "none";
+    }
 
     const cursor = cursorRef.current;
+    const rotWrapper = rotWrapperRef.current;
     cornersRef.current = cursor.querySelectorAll(".target-cursor-corner");
 
-    gsap.set(cursor, { xPercent: -50, yPercent: -50, x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    gsap.set(cursor, {
+      xPercent: -50,
+      yPercent: -50,
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
 
-    const startSpin = () => {
-      spinTl.current?.kill();
-      spinTl.current = gsap.timeline({ repeat: -1 }).to(cursor, {
-        rotation: "+=360",
-        duration: spinDuration,
-        ease: "none",
-      });
-    };
-    const stopSpin = () => {
-      spinTl.current?.pause();
-      gsap.set(cursor, { rotation: 0 });
-    };
-    startSpin();
+    // Start hardware-accelerated CSS rotation
+    if (rotWrapper) {
+      rotWrapper.classList.add("target-cursor-spin-active");
+    }
+
+    // High performance quickTo setters (zero garbage collection overhead)
+    const xTo = gsap.quickTo(cursor, "x", { duration: 0.1, ease: "power3.out" });
+    const yTo = gsap.quickTo(cursor, "y", { duration: 0.1, ease: "power3.out" });
 
     let clientX = window.innerWidth / 2;
     let clientY = window.innerHeight / 2;
@@ -68,9 +64,11 @@ const TargetCursor = ({
     const updateCursorPosition = () => {
       if (activeTargetRef.current) {
         const { x, y } = centerRef.current;
-        moveCursor(x, y, true);
+        xTo(x);
+        yTo(y);
       } else {
-        moveCursor(clientX, clientY);
+        xTo(clientX);
+        yTo(clientY);
       }
       tick = false;
     };
@@ -85,25 +83,31 @@ const TargetCursor = ({
     };
     window.addEventListener("mousemove", onMove, { passive: true });
 
+    let scrollTick = false;
     const onScroll = () => {
-      const target = activeTargetRef.current;
-      if (!target || !cursorRef.current) return;
-
-      const { x, y } = centerRef.current;
-      const el = document.elementFromPoint(x, y);
-      const stillOver =
-        el &&
-        (el === target || !!el.closest(targetSelector)) &&
-        (() => {
+      if (scrollTick || !activeTargetRef.current) return;
+      scrollTick = true;
+      requestAnimationFrame(() => {
+        const target = activeTargetRef.current;
+        if (target) {
           const r = target.getBoundingClientRect();
-          const cx = r.left + r.width / 2;
-          const cy = r.top + r.height / 2;
-          return Math.abs(cx - x) <= tolerancePx && Math.abs(cy - y) <= tolerancePx;
-        })();
-
-      if (!stillOver) {
-        leaveCurrentTarget();
-      }
+          const isVisible =
+            r.bottom >= 0 &&
+            r.top <= window.innerHeight &&
+            r.right >= 0 &&
+            r.left <= window.innerWidth;
+          if (!isVisible) {
+            leaveCurrentTarget();
+          } else {
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            centerRef.current = { x: cx, y: cy };
+            xTo(cx);
+            yTo(cy);
+          }
+        }
+        scrollTick = false;
+      });
     };
     window.addEventListener("scroll", onScroll, { passive: true });
 
@@ -120,7 +124,7 @@ const TargetCursor = ({
       Array.from(cornersRef.current).forEach((corner, i) => {
         tl.to(
           corner,
-          { x: positions[i].x, y: positions[i].y, duration: 0.28, ease: "power3.out" },
+          { x: positions[i].x, y: positions[i].y, duration: 0.2, ease: "power3.out" },
           0
         );
       });
@@ -160,14 +164,18 @@ const TargetCursor = ({
         [brc, brOffset],
         [blc, blOffset],
       ].forEach(([corner, off]) => {
-        tl.to(corner, { x: off.x, y: off.y, duration: 0.2, ease: "power2.out" }, 0);
+        tl.to(corner, { x: off.x, y: off.y, duration: 0.16, ease: "power2.out" }, 0);
       });
     };
 
     const enterTarget = (target) => {
       activeTargetRef.current = target;
 
-      stopSpin();
+      if (rotWrapper) {
+        rotWrapper.classList.remove("target-cursor-spin-active");
+        gsap.set(rotWrapper, { rotation: 0 });
+      }
+
       const r = target.getBoundingClientRect();
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
@@ -177,15 +185,14 @@ const TargetCursor = ({
       updateCorners(target);
 
       const onTargetMove = (ev) => {
-        const { clientX, clientY } = ev;
-        updateCorners(target, clientX, clientY);
+        updateCorners(target, ev.clientX, ev.clientY);
       };
 
       const onLeave = () => {
         leaveCurrentTarget();
       };
 
-      target.addEventListener("mousemove", onTargetMove);
+      target.addEventListener("mousemove", onTargetMove, { passive: true });
       target.addEventListener("mouseleave", onLeave);
 
       target.__cursorDetach = () => {
@@ -200,7 +207,9 @@ const TargetCursor = ({
       target.__cursorDetach?.();
       activeTargetRef.current = null;
       resetCorners();
-      startSpin();
+      if (rotWrapper) {
+        rotWrapper.classList.add("target-cursor-spin-active");
+      }
     };
 
     const onOver = (e) => {
@@ -225,16 +234,16 @@ const TargetCursor = ({
 
     const onDown = () => {
       if (!dotRef.current) return;
-      gsap.to(dotRef.current, { scale: 0.7, duration: 0.2 });
+      gsap.to(dotRef.current, { scale: 0.7, duration: 0.15 });
       gsap.to(cursor, { scale: 0.92, duration: 0.15 });
     };
     const onUp = () => {
       if (!dotRef.current) return;
-      gsap.to(dotRef.current, { scale: 1, duration: 0.2 });
+      gsap.to(dotRef.current, { scale: 1, duration: 0.15 });
       gsap.to(cursor, { scale: 1, duration: 0.15 });
     };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("mousedown", onDown, { passive: true });
+    window.addEventListener("mouseup", onUp, { passive: true });
 
     return () => {
       window.removeEventListener("mousemove", onMove);
@@ -245,17 +254,16 @@ const TargetCursor = ({
       if (activeTargetRef.current) {
         activeTargetRef.current.__cursorDetach?.();
       }
-      spinTl.current?.kill();
       document.body.style.cursor = originalCursor;
     };
-  }, [targetSelector, spinDuration, hideDefaultCursor, snapDuration, tolerancePx, moveCursor, constants]);
+  }, [targetSelector, hideDefaultCursor, snapDuration, constants]);
 
   return (
     <div
       ref={cursorRef}
-      className="fixed top-0 left-0 w-0 h-0 pointer-events-none z-[9999] -translate-x-1/2 -translate-y-1/2"
+      className="hidden lg:block fixed top-0 left-0 w-0 h-0 pointer-events-none z-[9999] -translate-x-1/2 -translate-y-1/2"
       style={{ willChange: "transform" }}
-      aria-hidden
+      aria-hidden="true"
     >
       {/* Central White Dot */}
       <div
@@ -263,11 +271,14 @@ const TargetCursor = ({
         className="absolute left-1/2 top-1/2 w-1.5 h-1.5 bg-white rounded-full -translate-x-1/2 -translate-y-1/2"
         style={{ willChange: "transform" }}
       />
-      {/* 4 Purple snap-corners */}
-      <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] -translate-x-[150%] -translate-y-[150%] border-r-0 border-b-0" />
-      <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] translate-x-1/2 -translate-y-[150%] border-l-0 border-b-0" />
-      <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] translate-x-1/2 translate-y-1/2 border-l-0 border-t-0" />
-      <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] -translate-x-[150%] translate-y-1/2 border-r-0 border-t-0" />
+      {/* Rotating Corners Wrapper */}
+      <div ref={rotWrapperRef} className="absolute left-0 top-0 w-0 h-0">
+        {/* 4 Purple snap-corners */}
+        <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] -translate-x-[150%] -translate-y-[150%] border-r-0 border-b-0" />
+        <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] translate-x-1/2 -translate-y-[150%] border-l-0 border-b-0" />
+        <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] translate-x-1/2 translate-y-1/2 border-l-0 border-t-0" />
+        <div className="target-cursor-corner absolute left-1/2 top-1/2 w-3 h-3 border-[2px] border-[#5E0ED7] -translate-x-[150%] translate-y-1/2 border-r-0 border-t-0" />
+      </div>
     </div>
   );
 };

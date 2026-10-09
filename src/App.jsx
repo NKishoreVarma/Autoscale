@@ -234,7 +234,7 @@ export default function App() {
   return (
     <div className="relative min-h-screen text-white selection:bg-white selection:text-black overflow-x-hidden bg-transparent">
       {/* Global Video Background with visibility control and poster fallback */}
-      <div className="fixed inset-0 z-0 overflow-hidden bg-black">
+      <div className="fixed inset-0 z-0 overflow-hidden bg-black pointer-events-none">
         {isVideoInit && (
           <video
             ref={videoRef}
@@ -243,8 +243,8 @@ export default function App() {
             playsInline
             preload="metadata"
             poster="/assets/background-poster.webp"
-            className="absolute inset-0 w-full h-full object-cover"
-            style={{ opacity: 0.28 }}
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+            style={{ opacity: 0.28, transform: 'translateZ(0)', willChange: 'opacity' }}
           >
             <source src="/silk-1781249661241.webm" type="video/webm" />
           </video>

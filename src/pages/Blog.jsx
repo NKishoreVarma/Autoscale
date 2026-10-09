@@ -100,7 +100,10 @@ export default function Blog() {
   if (slug && currentPost) {
     return (
       <div className="pt-28 pb-24 px-6 md:px-12 lg:px-16 relative z-10 max-w-4xl mx-auto">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-[#5E0ED7]/5 rounded-full blur-[120px] pointer-events-none -z-10" />
+        <div 
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full blur-[30px] pointer-events-none -z-10 opacity-40" 
+          style={{ background: 'radial-gradient(circle, rgba(94, 14, 215, 0.15) 0%, transparent 70%)', transform: 'translateX(-50%) translateZ(0)' }}
+        />
 
         <Link
           to="/blog"
@@ -197,7 +200,10 @@ export default function Blog() {
   // Blog list view
   return (
     <div className="pt-28 pb-24 px-6 md:px-12 lg:px-16 relative z-10 max-w-6xl mx-auto space-y-12">
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#5E0ED7]/5 rounded-full blur-[120px] pointer-events-none -z-10" />
+      <div 
+        className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full blur-[30px] pointer-events-none -z-10 opacity-40" 
+        style={{ background: 'radial-gradient(circle, rgba(94, 14, 215, 0.15) 0%, transparent 70%)', transform: 'translate(-50%, -50%) translateZ(0)' }}
+      />
 
       {/* Header */}
       <div className="text-center space-y-4">

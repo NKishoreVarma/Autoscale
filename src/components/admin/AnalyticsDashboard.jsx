@@ -318,7 +318,10 @@ export default function AnalyticsDashboard() {
 
       {/* Conversion Funnel Widget */}
       <div className="p-6 rounded-xl border border-white/5 bg-white/[0.01] flex flex-col gap-6 w-full relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-[#5E0ED7]/5 rounded-full pointer-events-none blur-[100px] -z-10" />
+        <div 
+          className="absolute top-0 right-0 w-80 h-80 rounded-full pointer-events-none blur-[25px] -z-10 opacity-40" 
+          style={{ background: 'radial-gradient(circle, rgba(94, 14, 215, 0.15) 0%, transparent 70%)', transform: 'translateZ(0)' }}
+        />
         
         <div>
           <h3 className="text-sm font-semibold tracking-wider uppercase text-white">
